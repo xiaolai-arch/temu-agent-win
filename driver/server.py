@@ -96,12 +96,12 @@ def ocr_last(name: str | None = None) -> str:
     import glob
     import os
     if name:
-        cands = sorted(glob.glob(os.path.join(shot.SHOT_DIR, f"*-{name}.png")))
+        cands = sorted(glob.glob(os.path.join(shot.SHOT_DIR, f"*-{name}.png")), key=os.path.getmtime)
         if not cands:
             return f"未找到 *-{name}.png"
         path = cands[-1]
     else:
-        cands = sorted(glob.glob(os.path.join(shot.SHOT_DIR, "*.png")))
+        cands = sorted(glob.glob(os.path.join(shot.SHOT_DIR, "*.png")), key=os.path.getmtime)
         if not cands:
             return "screenshots/ 为空，先 screenshot()"
         path = cands[-1]
@@ -113,11 +113,12 @@ def ocr_last(name: str | None = None) -> str:
 @mcp.tool()
 def click_point(x: int, y: int) -> str:
     """人类化点击截图坐标 (x,y)（物理像素，原点=最近一次截图的窗口左上角）。"""
-    if shot.LAST_SHOT["hwnd"] is None:
+    last = shot._load_last_shot()
+    if last["hwnd"] is None:
         raise RuntimeError("先 screenshot() 建立坐标系")
-    w = winutil.find_window(shot.LAST_SHOT["hwnd"]) or _win()
-    human_click(shot.LAST_SHOT["left"] + x, shot.LAST_SHOT["top"] + y, activate_window=w)
-    return f"clicked ({x},{y}) -> screen ({shot.LAST_SHOT['left'] + x},{shot.LAST_SHOT['top'] + y})"
+    w = winutil.find_window(last["hwnd"]) or _win()
+    human_click(last["left"] + x, last["top"] + y, activate_window=w)
+    return f"clicked ({x},{y}) -> screen ({last['left'] + x},{last['top'] + y})"
 
 
 @mcp.tool()
@@ -159,7 +160,7 @@ def write_report(task: str, ok: bool, lines: list[str]) -> str:
     """写中文报告（logs/report-latest.md + 历史 + last-status.json），lines 逐条为要点。"""
     import glob
     import os
-    cands = sorted(glob.glob(os.path.join(shot.SHOT_DIR, "*.png")))
+    cands = sorted(glob.glob(os.path.join(shot.SHOT_DIR, "*.png")), key=os.path.getmtime)
     shots_recent = [os.path.abspath(p) for p in cands[-3:]]
     return "report: " + report.write_report(task, ok, lines, shots_recent)
 

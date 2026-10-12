@@ -13,8 +13,27 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 SHOT_DIR = os.path.abspath(os.path.join(BASE, "..", "screenshots"))
 OCR_PS = os.path.join(BASE, "ocr.ps1")
 
-# 最近一次成功截图的坐标系（窗口 hwnd + 屏幕原点），click_point 用它换算
+# 最近一次成功截图的坐标系（窗口 hwnd + 屏幕原点），click_point 用它换算；
+# 持久化到文件，跨进程（ctl.py / server.py）共享
+_LAST_SHOT_FILE = os.path.join(BASE, ".last-shot.json")
 LAST_SHOT = {"hwnd": None, "left": 0, "top": 0}
+
+
+def _load_last_shot():
+    try:
+        with open(_LAST_SHOT_FILE, encoding="utf-8") as f:
+            LAST_SHOT.update(json.load(f))
+    except Exception:
+        pass
+    return LAST_SHOT
+
+
+def _save_last_shot():
+    try:
+        with open(_LAST_SHOT_FILE, "w", encoding="utf-8") as f:
+            json.dump(LAST_SHOT, f)
+    except Exception:
+        pass
 
 
 def _timestamp() -> str:
@@ -31,6 +50,7 @@ def screenshot(win, name: str = "shot") -> str:
     img.save(path)
     r = win.rectangle()
     LAST_SHOT.update(hwnd=win.handle, left=r.left, top=r.top, w=img.size[0], h=img.size[1])
+    _save_last_shot()
     return path
 
 
