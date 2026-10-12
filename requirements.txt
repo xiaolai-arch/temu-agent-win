@@ -1,0 +1,4 @@
+mcp>=2
+comtypes
+pywinauto
+pillow

@@ -1,0 +1,16 @@
+# 凭据（红线：绝不提交）
+local.config.json
+
+# 运行产物
+logs/
+screenshots/
+reports/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node / 插件构建
+node_modules/
+plugin/temu-panel/dist/

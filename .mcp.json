@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "temu-driver": {
+      "command": "python",
+      "args": ["D:\\temu-agent\\driver\\server.py"]
+    }
+  }
+}
