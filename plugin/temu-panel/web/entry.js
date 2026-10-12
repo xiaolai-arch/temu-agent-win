@@ -80,14 +80,18 @@ export function mount(container, hostApi) {
     c.appendChild(el("h4", null, label));
     c.appendChild(el("p", null, desc));
     if (enabled) c.onclick = async () => {
-      if (!confirm(`运行「${label}」？（只读任务，不点任何同步按钮）`)) return;
+      if (!confirm(`运行「${label}」？（只读任务，不点任何同步按钮；切店任务遇验证码会暂停等你）`)) return;
       lineCount = 0; root.querySelector("#tp-log").textContent = "";
       await api.rpc("POST", "/run", { task: id });
       refresh(root);
     };
     return c;
   };
-  grid.appendChild(card({ id: "sync-check", label: "同步体检（只读）", desc: "登录态+双按钮验证+截图+报告", enabled: true }));
+  // 任务按钮从 /status 动态渲染（含各店切店+体检）
+  api.rpc("GET", "/status").then((st) => {
+    for (const t of [...(st.tasks || [])].reverse())
+      grid.insertBefore(card({ id: t.id, label: t.label, desc: "只读体检 · 不点同步按钮", enabled: true }), grid.firstChild);
+  }).catch(() => {});
   for (const t of PLACEHOLDER_TASKS) grid.appendChild(card({ ...t, enabled: false }));
 
   root.querySelector("#tp-stop").onclick = () => api.rpc("POST", "/stop", {});

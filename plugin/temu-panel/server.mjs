@@ -15,11 +15,22 @@ const REPORT_FILE = path.join(TEMU_DIR, "logs", "report-latest.md");
 const portArg = process.argv.indexOf("--port");
 const STANDALONE_PORT = portArg > -1 ? Number(process.argv[portArg + 1]) : null;
 
+// 店铺定义（账号切换式多店铺，详见 discoveries/store-switch.md）
+function storeTaskPrompt(storeId, label) {
+  if (storeId === "main") {
+    return "按照 .claude/skills/temu-sync-check/SKILL.md 的流程对主店铺执行只读同步体检（当前浏览器应已登录主店），完成后汇报登录态与双按钮状态。绝不点击同步按钮。";
+  }
+  return `先按 .claude/skills/temu-store-switch/SKILL.md 的流程切换到店铺「${label}」（store id: ${storeId}，凭据在 local.config.json），` +
+    "切店成功后按 temu-sync-check 的流程做只读体检。全程不点任何同步按钮，不碰验证码（若出现验证码或协议勾选卡住，暂停并提示用户）。最后汇报该店账号名、登录态、双按钮状态。";
+}
+
 const TASKS = {
   "sync-check": {
-    label: "同步体检（只读）",
+    label: "同步体检 · 主店（只读）",
     prompt: "按照 .claude/skills/temu-sync-check/SKILL.md 定义的流程执行每日同步体检任务（只读，不点任何同步按钮），完成后简短汇报结论。",
   },
+  "check:store-b": { label: "切到店铺B + 体检", prompt: storeTaskPrompt("store-b", "店铺B") },
+  "check:store-c": { label: "切到店铺C + 体检", prompt: storeTaskPrompt("store-c", "店铺C") },
 };
 
 const state = {
@@ -169,7 +180,11 @@ function card(id, label, desc, enabled) {
   return c;
 }
 const grid = document.getElementById('grid');
-grid.appendChild(card('sync-check', '同步体检（只读）', '登录态 + 双按钮验证 + 截图 + 中文报告', true));
+(async () => {  // 任务按钮从 /status 动态渲染（含切店任务）
+  const st = await (await fetch('/status')).json();
+  for (const t of [...(st.tasks || [])].reverse())
+    grid.insertBefore(card(t.id, t.label, '只读体检 · 不点同步按钮', true), grid.firstChild);
+})();
 for (const [id, label] of PLACEHOLDERS) grid.appendChild(card(id, label, '待发现会话', false));
 refresh(); setInterval(refresh, 1500);
 </script></body></html>`;
