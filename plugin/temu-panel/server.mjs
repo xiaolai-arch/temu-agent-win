@@ -16,21 +16,36 @@ const portArg = process.argv.indexOf("--port");
 const STANDALONE_PORT = portArg > -1 ? Number(process.argv[portArg + 1]) : null;
 
 // 店铺定义（账号切换式多店铺，详见 discoveries/store-switch.md）
+function loadPhonePrefixes() {
+  try {
+    const accs = JSON.parse(fs.readFileSync(path.join(TEMU_DIR, "local.config.json"), "utf-8")).accounts || {};
+    const out = {};
+    for (const [k, v] of Object.entries(accs)) out[k] = String(v.phone || "").slice(0, 3);
+    return out;
+  } catch { return {}; }
+}
+const PHONE3 = loadPhonePrefixes();
+const STORES = [
+  { id: "main", label: `主店铺${PHONE3.main ? " " + PHONE3.main : ""}` },
+  { id: "store-b", label: `店铺B${PHONE3["store-b"] ? " " + PHONE3["store-b"] : ""}` },
+  { id: "store-c", label: `店铺C${PHONE3["store-c"] ? " " + PHONE3["store-c"] : ""}` },
+];
+
 function storeTaskPrompt(storeId, label) {
   if (storeId === "main") {
-    return "按照 .claude/skills/temu-sync-check/SKILL.md 的流程对主店铺执行只读同步体检（当前浏览器应已登录主店），完成后汇报登录态与双按钮状态。绝不点击同步按钮。";
+    return `按照 .claude/skills/temu-sync-check/SKILL.md 的流程对主店铺（${label}）执行只读同步体检（当前浏览器应已登录主店），完成后汇报登录态与双按钮状态。绝不点击同步按钮。`;
   }
   return `先按 .claude/skills/temu-store-switch/SKILL.md 的流程切换到店铺「${label}」（store id: ${storeId}，凭据在 local.config.json），` +
-    "切店成功后按 temu-sync-check 的流程做只读体检。全程不点任何同步按钮，不碰验证码（若出现验证码或协议勾选卡住，暂停并提示用户）。最后汇报该店账号名、登录态、双按钮状态。";
+    "切店成功后按 temu-sync-check 的流程做只读体检。全程不点任何同步按钮，不碰验证码（若出现验证码或协议确认卡住，暂停并提示用户）。最后汇报该店账号名、登录态、双按钮状态。";
 }
 
 const TASKS = {
   "sync-check": {
-    label: "同步体检 · 主店（只读）",
+    label: `体检 · ${STORES[0].label}`,
     prompt: "按照 .claude/skills/temu-sync-check/SKILL.md 定义的流程执行每日同步体检任务（只读，不点任何同步按钮），完成后简短汇报结论。",
   },
-  "check:store-b": { label: "切到店铺B + 体检", prompt: storeTaskPrompt("store-b", "店铺B") },
-  "check:store-c": { label: "切到店铺C + 体检", prompt: storeTaskPrompt("store-c", "店铺C") },
+  "check:store-b": { label: `切到${STORES[1].label} + 体检`, prompt: storeTaskPrompt("store-b", STORES[1].label) },
+  "check:store-c": { label: `切到${STORES[2].label} + 体检`, prompt: storeTaskPrompt("store-c", STORES[2].label) },
 };
 
 const state = {
