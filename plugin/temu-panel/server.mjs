@@ -130,78 +130,315 @@ function startTask(task) {
 
 const STANDALONE_HTML = `<!doctype html>
 <html lang="zh"><head><meta charset="utf-8">
-<title>TEMU 工作台（独立版）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TEMU 工作台</title>
 <style>
-  body { font-family: system-ui, "Microsoft YaHei", sans-serif; background: #1b1e24; color: #ddd; margin: 0; padding: 24px; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: #888; font-size: 12px; margin-bottom: 16px; }
-  #state { font-size: 14px; margin: 8px 0 2px; } #last { font-size: 12px; color: #999; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; margin: 14px 0; max-width: 960px; }
-  .card { border: 1px solid #3a3f4a; border-radius: 10px; padding: 14px; cursor: pointer; background: #22262e; transition: .15s; }
-  .card:hover { border-color: #4a9eff; transform: translateY(-1px); }
-  .card.disabled { opacity: .35; cursor: not-allowed; }
-  .card h4 { margin: 0 0 6px; font-size: 14px; } .card p { margin: 0; font-size: 12px; color: #999; }
-  #log { background: #10131a; color: #9fd49f; border-radius: 8px; padding: 12px; height: 300px; overflow-y: auto;
-         font: 12px/1.5 Consolas, monospace; white-space: pre-wrap; max-width: 960px; }
-  .sec { margin: 16px 0 6px; font-size: 14px; } button { background: #2b6cb0; color: #fff; border: 0; border-radius: 6px;
-         padding: 6px 16px; cursor: pointer; margin-left: 8px; }
-  button:hover { background: #3a7fc0; }
-  #report { background: #141820; border-radius: 8px; padding: 12px; font-size: 12px; white-space: pre-wrap;
-            max-height: 240px; overflow-y: auto; max-width: 960px; }
+  :root {
+    --bg0: #0d1017; --bg1: #131826; --card: #1a2030; --card-hi: #1f2740;
+    --line: #2a3348; --txt: #dbe2f0; --dim: #8b96ad; --faint: #5d6880;
+    --acc: #ff7a1a; --acc2: #ffb066; --ok: #34d399; --warn: #fbbf24; --err: #f87171;
+    --mono: "Cascadia Code", Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; color: var(--txt);
+    font-family: system-ui, "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: radial-gradient(1200px 600px at 80% -10%, #1c2440 0%, var(--bg0) 55%) fixed;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 32px 40px; }
+
+  /* ── 顶栏 ── */
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 26px; }
+  .logo {
+    width: 46px; height: 46px; border-radius: 13px; flex: none;
+    background: linear-gradient(135deg, #ff9440, #ff5c00);
+    display: grid; place-items: center; font-weight: 800; font-size: 22px; color: #fff;
+    box-shadow: 0 6px 18px rgba(255,110,20,.35);
+  }
+  .brand h1 { margin: 0; font-size: 20px; letter-spacing: .5px; }
+  .brand p { margin: 3px 0 0; font-size: 12px; color: var(--dim); }
+  .top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px;
+    border: 1px solid var(--line); border-radius: 999px; background: rgba(255,255,255,.03);
+    font-size: 13px; color: var(--dim);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #6b768e; }
+  .badge.run { color: var(--ok); border-color: rgba(52,211,153,.4); }
+  .badge.run .dot { background: var(--ok); animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,211,153,.5);} 50% { box-shadow: 0 0 0 6px rgba(52,211,153,0);} }
+  button {
+    border: 0; border-radius: 9px; padding: 8px 16px; font-size: 13px; cursor: pointer;
+    background: #26304a; color: var(--txt); transition: .18s;
+  }
+  button:hover { background: #303d5e; transform: translateY(-1px); }
+  button.danger { background: transparent; border: 1px solid rgba(248,113,113,.5); color: var(--err); display: none; }
+  button.danger:hover { background: rgba(248,113,113,.12); }
+  body.running button.danger { display: inline-block; }
+
+  /* ── 概要条 ── */
+  .summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+  .chip {
+    font-size: 12px; color: var(--dim); padding: 6px 12px; border-radius: 8px;
+    background: rgba(255,255,255,.03); border: 1px solid var(--line);
+  }
+  .chip b { color: var(--txt); font-weight: 600; }
+
+  /* ── 任务卡片 ── */
+  h2.sec { font-size: 13px; color: var(--dim); font-weight: 600; letter-spacing: 2px; margin: 26px 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+  .card {
+    position: relative; display: flex; gap: 14px; align-items: center;
+    background: linear-gradient(180deg, var(--card), #171d2c);
+    border: 1px solid var(--line); border-radius: 14px; padding: 16px; cursor: pointer;
+    transition: .18s; overflow: hidden;
+  }
+  .card:hover:not(.disabled) { border-color: rgba(255,122,26,.55); transform: translateY(-2px);
+    box-shadow: 0 10px 24px rgba(0,0,0,.35), 0 0 0 1px rgba(255,122,26,.15); }
+  .card.running { border-color: var(--acc); box-shadow: 0 0 18px rgba(255,122,26,.25); }
+  .card.running::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(255,122,26,.08), transparent);
+    animation: sweep 1.6s infinite;
+  }
+  @keyframes sweep { from { transform: translateX(-100%);} to { transform: translateX(100%);} }
+  .card.disabled { opacity: .38; cursor: not-allowed; filter: saturate(.4); }
+  .ava {
+    width: 42px; height: 42px; border-radius: 12px; flex: none; display: grid; place-items: center;
+    font-weight: 700; font-size: 17px; color: #fff;
+  }
+  .ava.a1 { background: linear-gradient(135deg, #ffa04d, #ff5c00); }
+  .ava.a2 { background: linear-gradient(135deg, #6ea8ff, #3b6fe0); }
+  .ava.a3 { background: linear-gradient(135deg, #7ee0b8, #1fa877); }
+  .ava.ghost { background: #2a3348; color: var(--dim); }
+  .card h4 { margin: 0; font-size: 15px; }
+  .card .phone { font-size: 11px; color: var(--acc2); font-family: var(--mono); }
+  .card p { margin: 4px 0 0; font-size: 12px; color: var(--dim); }
+  .tag { position: absolute; top: 10px; right: 12px; font-size: 10px; color: var(--dim);
+         border: 1px solid var(--line); border-radius: 5px; padding: 2px 7px; letter-spacing: 1px; }
+
+  /* ── 面板 ── */
+  .panels { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; margin-top: 6px; }
+  @media (max-width: 980px) { .panels { grid-template-columns: 1fr; } }
+  .panel { background: var(--bg1); border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+           display: flex; flex-direction: column; min-height: 380px; }
+  .panel-head {
+    display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+    border-bottom: 1px solid var(--line); background: rgba(255,255,255,.02);
+    font-size: 12px; color: var(--dim); letter-spacing: 1.5px;
+  }
+  .panel-head .dots { display: flex; gap: 5px; margin-right: 4px; }
+  .panel-head .dots i { width: 9px; height: 9px; border-radius: 50%; background: #3a4560; }
+  .panel-head .dots i:nth-child(1) { background: #ff5f57; } .panel-head .dots i:nth-child(2) { background: #febc2e; } .panel-head .dots i:nth-child(3) { background: #28c840; }
+  .panel-head button { margin-left: auto; padding: 4px 12px; font-size: 12px; }
+  #log {
+    flex: 1; margin: 0; padding: 14px 16px; overflow-y: auto; background: #0b0e15;
+    font: 12.5px/1.7 var(--mono); white-space: pre-wrap; word-break: break-all;
+  }
+  #log .ln { display: block; }
+  #log .ln.start { color: #7db4ff; } #log .ln.tool { color: #9fd49f; }
+  #log .ln.warn { color: var(--warn); } #log .ln.end { color: var(--dim); } #log .ln.doc { color: #67e8f9; }
+  #log .ln.plain { color: #c3cbdc; }
+  #log .empty { color: #525d75; font-style: italic; }
+  #report { flex: 1; margin: 0; padding: 14px 16px; overflow-y: auto; white-space: pre-wrap;
+            font: 12.5px/1.8 var(--mono); color: #c3cbdc; }
+  #report .h { color: var(--acc2); font-weight: 700; }
+  #report .fail { color: var(--err); } #report .okl { color: var(--ok); }
+
+  /* ── 模态 ── */
+  .mask { position: fixed; inset: 0; background: rgba(5,8,14,.66); backdrop-filter: blur(3px);
+          display: none; place-items: center; z-index: 50; }
+  .mask.show { display: grid; }
+  .modal { width: 380px; background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+           padding: 24px; animation: pop .18s ease; }
+  @keyframes pop { from { transform: scale(.94); opacity: 0; } }
+  .modal h3 { margin: 0 0 8px; font-size: 16px; }
+  .modal p { margin: 0 0 20px; font-size: 13px; color: var(--dim); line-height: 1.7; }
+  .modal .row { display: flex; gap: 10px; justify-content: flex-end; }
+  .btn-acc { background: linear-gradient(135deg, #ff9440, #ff5c00); color: #fff; }
+  .btn-acc:hover { background: linear-gradient(135deg, #ffa558, #ff6a1a); }
+
+  footer { margin-top: 22px; text-align: center; font-size: 11px; color: #4a5470; }
+  ::-webkit-scrollbar { width: 9px; } ::-webkit-scrollbar-thumb { background: #2b3550; border-radius: 5px; }
 </style></head><body>
-<h1>TEMU 工作台</h1>
-<div class="sub">computer-use 驱动日常 Edge · 零自动化参数 · 改数据操作永远不进面板（走对话确认）</div>
-<div id="state">…</div><div id="last"></div>
-<div class="grid" id="grid"></div>
-<div class="sec">运行日志 <button onclick="fetch('/stop',{method:'POST'})">停止</button></div>
-<div id="log"></div>
-<div class="sec">最近报告 <button onclick="loadReport()">刷新</button></div>
-<div id="report">（点"刷新"加载）</div>
+<div class="wrap">
+  <header>
+    <div class="logo">T</div>
+    <div class="brand">
+      <h1>TEMU 工作台</h1>
+      <p>computer-use 驱动日常 Edge · 零自动化参数 · 零验证码</p>
+    </div>
+    <div class="top-right">
+      <div class="badge" id="state"><span class="dot"></span><span id="stateText">连接中…</span></div>
+      <button class="danger" onclick="stop()">■ 停止任务</button>
+    </div>
+  </header>
+
+  <div class="summary">
+    <div class="chip" id="last"></div>
+    <div class="chip" id="runtime"></div>
+    <div class="chip">改数据操作 <b>不进面板</b>（走对话确认）</div>
+  </div>
+
+  <h2 class="sec">店铺任务</h2>
+  <div class="grid" id="grid"></div>
+
+  <h2 class="sec">运行与报告</h2>
+  <div class="panels">
+    <div class="panel">
+      <div class="panel-head"><span class="dots"><i></i><i></i><i></i></span>实时日志</div>
+      <pre id="log"><span class="empty">尚无日志 — 点击上方任务卡片开始</span></pre>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><span class="dots"><i></i><i></i><i></i></span>最近报告
+        <button onclick="loadReport()">刷新</button></div>
+      <pre id="report"><span class="empty">点「刷新」加载最新报告</span></pre>
+    </div>
+  </div>
+
+  <footer>temu-agent · CloudCLI 插件同源 · 本地 127.0.0.1 独立运行</footer>
+</div>
+
+<div class="mask" id="mask">
+  <div class="modal">
+    <h3 id="mTitle">运行任务</h3>
+    <p id="mDesc"></p>
+    <div class="row">
+      <button onclick="closeModal()">取消</button>
+      <button class="btn-acc" onclick="confirmRun()">开始运行</button>
+    </div>
+  </div>
+</div>
+
 <script>
-const PLACEHOLDERS = [["make-links","插件做链接"],["compliance","合规填写"],["collect-links","商品采集"],["price-review","价格报表"],["new-listing","上新"]];
-let lineCount = 0;
+var PLACEHOLDERS = [["make-links","插件做链接"],["compliance","合规填写"],["collect-links","商品采集"],["price-review","价格报表"],["new-listing","上新"]];
+var lineCount = 0, pendingTask = null, taskMap = {};
+
+function esc(s) { var d = document.createElement("i"); d.textContent = s; return d.innerHTML; }
+function badge(el) { return document.body.classList; }
+
+function renderState(st) {
+  var b = document.getElementById("state"), t = document.getElementById("stateText");
+  if (st.running) {
+    b.className = "badge run"; badge().add("running");
+    t.textContent = "运行中 · " + (taskMap[st.task] || st.task);
+  } else {
+    b.className = "badge"; badge().remove("running");
+    t.textContent = "空闲" + (st.finishedAt ? " · 上次 exit " + (st.exitCode ?? "-") : "");
+  }
+  document.getElementById("last").innerHTML = st.lastStatus
+    ? "上次任务 <b>" + esc(st.lastStatus.task) + "</b> " + (st.lastStatus.ok ? "✅" : "❌") + " " + esc(st.lastStatus.ts)
+    : "尚无运行记录";
+  document.getElementById("runtime").innerHTML = st.running
+    ? "已运行 <b id=\"rt\">–</b>"
+    : (st.startedAt ? "上次启动 " + esc(st.startedAt.replace("T", " ")) : "");
+  if (st.running) tick(st.startedAt);
+  markRunningCard(st.running ? st.task : null);
+}
+function markRunningCard(task) {
+  document.querySelectorAll(".card[data-task]").forEach(function (c) {
+    c.classList.toggle("running", c.getAttribute("data-task") === task);
+    c.classList.toggle("disabled", !!task && c.getAttribute("data-task") !== task);
+  });
+}
+function tick(startedAt) {
+  var el = document.getElementById("rt"); if (!el) return;
+  var s = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+  var m = Math.floor(s / 60);
+  el.textContent = (m >= 1 ? m + " 分 " : "") + (s % 60) + " 秒";
+}
+
+function appendLine(text) {
+  var log = document.getElementById("log");
+  var empty = log.querySelector(".empty"); if (empty) empty.remove();
+  var cls = "plain";
+  if (text.indexOf("▶") === 0) cls = "start";
+  else if (text.indexOf("🔧") === 0) cls = "tool";
+  else if (text.indexOf("⚠") === 0) cls = "warn";
+  else if (text.indexOf("■") === 0) cls = "end";
+  else if (text.indexOf("📄") === 0) cls = "doc";
+  var span = document.createElement("span");
+  span.className = "ln " + cls; span.textContent = text;
+  log.appendChild(span); log.scrollTop = log.scrollHeight;
+}
+
 async function refresh() {
   try {
-    const st = await (await fetch('/status')).json();
-    document.getElementById('state').textContent = st.running
-      ? '🟢 运行中: ' + st.task + '（' + new Date(st.startedAt).toLocaleTimeString() + ' 起）'
-      : '⚪ 空闲（上次 exit=' + (st.exitCode ?? '-') + (st.finishedAt ? '，' + new Date(st.finishedAt).toLocaleTimeString() : '') + '）';
-    if (st.lastStatus) document.getElementById('last').textContent =
-      '上次任务: ' + st.lastStatus.task + ' ' + (st.lastStatus.ok ? '✅' : '❌') + ' ' + st.lastStatus.ts;
-    const data = await (await fetch('/lines?since=' + lineCount)).json();
-    if (data.lines.length) {
-      const log = document.getElementById('log');
-      log.textContent += data.lines.join('\\n') + '\\n';
-      lineCount = data.total; log.scrollTop = log.scrollHeight;
+    var st = await (await fetch("/status")).json();
+    renderState(st);
+    var data = await (await fetch("/lines?since=" + lineCount)).json();
+    if (data.lines && data.lines.length) {
+      data.lines.forEach(appendLine); lineCount = data.total;
     }
-  } catch (e) { document.getElementById('state').textContent = '服务不可达: ' + e; }
+  } catch (e) {
+    document.getElementById("stateText").textContent = "服务不可达";
+  }
 }
-async function run(task, label) {
-  if (!confirm('运行「' + label + '」？（只读任务，不点任何同步按钮）')) return;
-  lineCount = 0; document.getElementById('log').textContent = '';
-  await fetch('/run', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ task }) });
+
+function askRun(task, label) {
+  pendingTask = task;
+  document.getElementById("mTitle").textContent = "运行「" + label + "」";
+  document.getElementById("mDesc").innerHTML =
+    "只读体检任务：验证登录态与双同步按钮，截图取证并生成中文报告。<br>" +
+    "<b style=\\"color:var(--warn)\\">不会点击任何同步按钮</b>；切店任务遇到验证码会暂停等你。";
+  document.getElementById("mask").classList.add("show");
+}
+function closeModal() { document.getElementById("mask").classList.remove("show"); pendingTask = null; }
+async function confirmRun() {
+  var t = pendingTask; closeModal();
+  if (!t) return;
+  lineCount = 0;
+  var log = document.getElementById("log");
+  log.innerHTML = "";
+  await fetch("/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ task: t }) });
   refresh();
 }
+async function stop() { if (confirm("确定停止当前任务？")) { await fetch("/stop", { method: "POST" }); refresh(); } }
+
 async function loadReport() {
-  const r = await (await fetch('/report')).json();
-  document.getElementById('report').textContent = r.report;
+  var r = await (await fetch("/report")).json();
+  var el = document.getElementById("report"); el.innerHTML = "";
+  String(r.report).split("\\n").forEach(function (line) {
+    var span = document.createElement("span");
+    if (line.indexOf("# ") === 0) span.className = "h";
+    else if (line.indexOf("✅") >= 0) span.className = "okl";
+    else if (line.indexOf("❌") >= 0) span.className = "fail";
+    span.textContent = line; el.appendChild(span);
+    el.appendChild(document.createTextNode("\\n"));
+  });
 }
-function card(id, label, desc, enabled) {
-  const c = document.createElement('div');
-  c.className = 'card' + (enabled ? '' : ' disabled');
-  c.innerHTML = '<h4></h4><p></p>';
-  c.querySelector('h4').textContent = label; c.querySelector('p').textContent = desc;
-  if (enabled) c.onclick = () => run(id, label);
+
+function card(task, label, desc, enabled, avClass, ghost) {
+  var c = document.createElement("div");
+  c.className = "card" + (enabled ? "" : " disabled");
+  if (task) c.setAttribute("data-task", task);
+  var name = label.split(" ")[0], phone = label.split(" ")[1] || "";
+  c.innerHTML = '<div class="ava ' + (ghost ? "ghost" : avClass) + '">' + esc(name.charAt(0)) + '</div>' +
+    '<div><h4>' + esc(name) + " " + (phone ? '<span class="phone">' + esc(phone) + "</span>" : "") + "</h4>" +
+    "<p>" + esc(desc) + "</p></div>" +
+    (ghost ? '<span class="tag">待发现</span>' : "");
+  if (enabled && task) c.onclick = function () { askRun(task, label); };
   return c;
 }
-const grid = document.getElementById('grid');
-(async () => {  // 任务按钮从 /status 动态渲染（含切店任务）
-  const st = await (await fetch('/status')).json();
-  for (const t of [...(st.tasks || [])].reverse())
-    grid.insertBefore(card(t.id, t.label, '只读体检 · 不点同步按钮', true), grid.firstChild);
+
+var grid = document.getElementById("grid");
+var AVA = ["a1", "a2", "a3"];
+(async function () {
+  try {
+    var st = await (await fetch("/status")).json();
+    (st.tasks || []).forEach(function (t, i) {
+      taskMap[t.id] = t.label;
+      grid.insertBefore(card(t.id, t.label, "只读体检 · 不点同步按钮", true, AVA[i % 3]), grid.firstChild);
+    });
+  } catch (e) {}
+  PLACEHOLDERS.forEach(function (p) { grid.appendChild(card(null, p[1], "流程待发现会话", false, "", true)); });
 })();
-for (const [id, label] of PLACEHOLDERS) grid.appendChild(card(id, label, '待发现会话', false));
+
 refresh(); setInterval(refresh, 1500);
+setInterval(function () {
+  fetch("/status").then(function (r) { return r.json(); }).then(function (st) { if (st.running) tick(st.startedAt); }).catch(function () {});
+}, 1000);
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
