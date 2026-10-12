@@ -331,7 +331,7 @@ function renderState(st) {
     ? "上次任务 <b>" + esc(st.lastStatus.task) + "</b> " + (st.lastStatus.ok ? "✅" : "❌") + " " + esc(st.lastStatus.ts)
     : "尚无运行记录";
   document.getElementById("runtime").innerHTML = st.running
-    ? "已运行 <b id=\"rt\">–</b>"
+    ? "已运行 <b id='rt'>–</b>"
     : (st.startedAt ? "上次启动 " + esc(st.startedAt.replace("T", " ")) : "");
   if (st.running) tick(st.startedAt);
   markRunningCard(st.running ? st.task : null);
@@ -381,7 +381,7 @@ function askRun(task, label) {
   document.getElementById("mTitle").textContent = "运行「" + label + "」";
   document.getElementById("mDesc").innerHTML =
     "只读体检任务：验证登录态与双同步按钮，截图取证并生成中文报告。<br>" +
-    "<b style=\\"color:var(--warn)\\">不会点击任何同步按钮</b>；切店任务遇到验证码会暂停等你。";
+    "<b style='color:var(--warn)'>不会点击任何同步按钮</b>；切店任务遇到验证码会暂停等你。";
   document.getElementById("mask").classList.add("show");
 }
 function closeModal() { document.getElementById("mask").classList.remove("show"); pendingTask = null; }
