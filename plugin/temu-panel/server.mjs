@@ -32,11 +32,10 @@ const STORES = [
 ];
 
 function storeTaskPrompt(storeId, label) {
-  if (storeId === "main") {
-    return `按照 .claude/skills/temu-sync-check/SKILL.md 的流程对主店铺（${label}）执行只读同步体检（当前浏览器应已登录主店），完成后汇报登录态与双按钮状态。绝不点击同步按钮。`;
-  }
-  return `先按 .claude/skills/temu-store-switch/SKILL.md 的流程切换到店铺「${label}」（store id: ${storeId}，凭据在 local.config.json），` +
-    "切店成功后按 temu-sync-check 的流程做只读体检。全程不点任何同步按钮，不碰验证码（若出现验证码或协议确认卡住，暂停并提示用户）。最后汇报该店账号名、登录态、双按钮状态。";
+  return `先运行确定性切店脚本：python D:\\temu-agent\\driver\\switch_store.py ${storeId}（等待其完成，查看输出与退出码）。` +
+    `若退出码 3（卡 Agent Center 授权页，该页对自动操作免疫）：明确提示用户"浏览器当前页面用鼠标点一下「商家中心」卡片"，等用户完成后重跑脚本验证。` +
+    `若退出码 2（验证码/密码问题）：如实报告，绝不代输验证码。` +
+    `切店成功后按 .claude/skills/temu-sync-check/SKILL.md 流程做只读体检（登录态+双按钮+截图+报告）。全程不点任何同步按钮。`;
 }
 
 const TASKS = {
@@ -46,6 +45,7 @@ const TASKS = {
   },
   "check:store-b": { label: `切到${STORES[1].label} + 体检`, prompt: storeTaskPrompt("store-b", STORES[1].label) },
   "check:store-c": { label: `切到${STORES[2].label} + 体检`, prompt: storeTaskPrompt("store-c", STORES[2].label) },
+  "check:main": { label: `切回${STORES[0].label} + 体检`, prompt: storeTaskPrompt("main", STORES[0].label) },
 };
 
 const state = {
