@@ -14,3 +14,4 @@ __pycache__/
 # Node / 插件构建
 node_modules/
 plugin/temu-panel/dist/
+driver/.last-shot.json
