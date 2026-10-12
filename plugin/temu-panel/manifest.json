@@ -1,0 +1,10 @@
+{
+  "name": "temu-panel",
+  "displayName": "TEMU 工作台",
+  "version": "0.1.0",
+  "description": "TEMU 卖家自动化任务面板：computer-use 驱动日常 Edge（同步体检/做链接/合规/采集/价格/上新）",
+  "entry": "web/entry.js",
+  "slot": "tab",
+  "type": "module",
+  "server": "server.mjs"
+}
