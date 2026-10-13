@@ -11,7 +11,8 @@
   3. 手机号框 ^a 重打 → 点手机号框→Tab→^a→输密码（Tab 法，密码框无法坐标点击）
   4. 点「登录」→ 处理「同意并登录」确认弹层（布局左移，按钮在左侧）
   5. seller 落地 site-main → Agent Center 联动（导航 customize-goods 验证账号+双按钮）
-  6. 不联动时的补救：settle/seller-login?redirectUrl=… 强制重授权（2026-10-13 实测入口）
+  6. 不联动时的补救（2026-10-13 定稿）：seller 主页 → 侧边栏 商品管理 → 定制商品内容
+     → 授权卡（勾协议→确认授权并前往→「确认切换」）→ 定制商品内容页
 
 退出码：0=成功 1=环境/页面异常 2=需要人工（验证码/密码错）3=切换后验证失败
 """
@@ -31,15 +32,41 @@ import report
 BASE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(BASE, ".."))
 LOGIN_URL = "https://seller.kuajingmaihuo.com/login"
+SELLER_MAIN_URL = "https://seller.kuajingmaihuo.com/site-main"
 TARGET_URL = "https://agentseller.temu.com/main/customize-goods"
-# seller-login 重授权入口（Agent Center 联动补救）
-REAUTH_URL = ("https://seller.kuajingmaihuo.com/settle/seller-login?redirectUrl="
-              "https%3A%2F%2Fagentseller.temu.com%2Fmain%2Fcustomize-goods")
 
-ACCOUNT_NAME = {"main": "hpoiZee", "store-b": "boliooZ"}  # store-c 未知：记录实测
+ACCOUNT_NAME = {"main": "hpoiZee", "store-b": "boliooZ"}  # 首登后自动学习补写
 FALLBACK_LOGIN_BTN = (1876, 859)  # 布局漂移兜底（正常布局实测）
 CAPTCHA_WORDS = ["验证码", "滑块", "拖动", "下方", "拼图"]
 AUTHFAIL_WORDS = ["密码错误", "不正确", "账号或密码", "失败"]
+
+
+def _load_names():
+    """从 local.config.json accounts.<id>.name 加载已学习的店名（不打印任何凭据）。"""
+    global ACCOUNT_NAME
+    try:
+        d = json.load(open(os.path.join(ROOT, "local.config.json"), encoding="utf-8"))
+        for sid, acc in d.get("accounts", {}).items():
+            if isinstance(acc, dict) and acc.get("name"):
+                ACCOUNT_NAME[sid] = str(acc["name"])
+    except Exception:
+        pass
+
+
+def _learn_name(store_id, name):
+    """首登成功后把店名写回 local.config.json（下次运行即可严格校验）。"""
+    if not name:
+        return
+    p = os.path.join(ROOT, "local.config.json")
+    try:
+        d = json.load(open(p, encoding="utf-8"))
+        if store_id in d.get("accounts", {}) and d["accounts"][store_id].get("name") != name:
+            d["accounts"][store_id]["name"] = name
+            json.dump(d, open(p, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+        ACCOUNT_NAME[store_id] = name
+        log(f"→ 已学习店名 {store_id}={name}（写入配置，下次严格校验）")
+    except Exception as e:
+        log(f"⚠ 店名写入失败: {type(e).__name__}")
 
 
 def log(m):
@@ -144,11 +171,17 @@ def detect_block(lines):
 
 
 def agent_account(lines):
-    """定制商品页右上角账号名。"""
+    """定制商品页右上角账号名（小字 OCR 易漏，支持右上角区域拉丁词兜底）。"""
     text = " ".join(l["text"] for l in lines)
     for name in ["hpoiZee", "bolioo"]:
         if name in text:
             return name
+    import re
+    for l in lines:  # 右上角区域的拉丁词（账号名如 hpoiZee/boliooZ）
+        if l["x"] > 2150 and l["y"] < 260:
+            m = re.search(r"[a-z][A-Za-z0-9]{4,}", l["text"])
+            if m and m.group(0).lower() not in ("seller", "temu", "beta"):
+                return m.group(0)
     return None
 
 
@@ -157,6 +190,21 @@ def sync_buttons(lines):
     b1 = next((l for l in lines if "按勾选" in l["text"].replace(" ", "")), None)
     b2 = next((l for l in lines if "忆托ERP" in l["text"].replace(" ", "")), None)
     return b1, b2
+
+
+def _dismiss_save_pwd(w, lines):
+    """Edge「保存密码？」气泡（登录成功后弹出，盖住页面右侧干扰 OCR/点击）：
+    点「以后再说」关掉。不保存、不改任何浏览器设置。返回 True 若关掉了。"""
+    if not find_line(lines, ["保存密码", "更新密码"]):
+        return False
+    btn = find_line(lines, ["以后再说", "一律拒绝", "不保存"])
+    if btn:
+        log("→ 关闭 Edge「保存密码」气泡")
+        click(w, (btn["x"] + btn["w"] // 2, btn["y"] + btn["h"] // 2))
+        time.sleep(1)
+        return True
+    log("⚠ 保存密码气泡在但没找到关闭按钮")
+    return False
 
 
 def do_login(w, phone, password):
@@ -190,8 +238,11 @@ def do_login(w, phone, password):
         log("→ 处理「同意并登录」确认层")
         click(w, c)
     time.sleep(8)
-    # 6) 结果判定
+    # 6) 结果判定（先关掉「保存密码」气泡再截图判定）
     lines = ocr_lines(shot(w, "result"))
+    if _dismiss_save_pwd(w, lines):
+        time.sleep(1)
+        lines = ocr_lines(shot(w, "result2"))
     blocked = detect_block(lines)
     if blocked:
         return blocked
@@ -201,77 +252,223 @@ def do_login(w, phone, password):
     return None
 
 
-def check_target(w, expect_old=None):
-    """导航定制商品页，返回 (账号名 or None, (b1,b2), lines)。"""
-    uia_shell.navigate(w, TARGET_URL)
-    time.sleep(6)
-    lines = ocr_lines(shot(w, "target"))
-    return agent_account(lines), sync_buttons(lines), lines
-
-
-def reauth_agent_center(w):
-    """Agent Center 联动：settle/seller-login 重授权。
-    实测链路：seller-login 页选分区「全球(除欧区、美国)」→ redirect →
-    agentseller/auth/authentication 地区页点「中国地区」→ 完成授权。"""
-    log("→ Agent Center 未联动，走重授权入口…")
-    uia_shell.navigate(w, REAUTH_URL)
-    time.sleep(5)
-    # ① settle/seller-login：选分区「全球(除欧区、美国)」（OCR 有漏读波动，重试 3 轮）
-    pos = None
-    for _ in range(3):
-        lines = ocr_lines(shot(w, "reauth"))
-        for l in lines:
-            t = l["text"].replace(" ", "")
-            if "全球" in t and l["x"] > 900:
-                pos = (l["x"] + l["w"] // 2, l["y"] + l["h"] // 2)
+def check_target(w, navigate=True):
+    """验证定制商品页。正常链路优先：切「定制商品内容」标签 → F5 刷新
+    （标签可能是上一店的旧标签，刷新后按当前授权重载）；无标签才导航 URL 兜底。
+    右上角账号名漏读时裁剪放大重读两轮。"""
+    try:
+        uia_shell.switch_tab(w, "定制商品")
+        time.sleep(1)
+        from input import type_keys as _tk
+        w.set_focus()
+        _tk("{F5}")
+        time.sleep(6)
+    except RuntimeError:
+        if navigate:
+            uia_shell.navigate(w, TARGET_URL)
+            time.sleep(6)
+    path = shot(w, "target")
+    lines = ocr_lines(path)
+    _dismiss_save_pwd(w, lines)  # 气泡可能盖住按钮/账号区
+    acc = agent_account(lines)
+    if acc is None and (sync_buttons(lines)[0] or sync_buttons(lines)[1]):
+        from PIL import Image
+        for _ in range(2):
+            img = Image.open(path)
+            crop = img.crop((2150, 110, 2582, 250))
+            crop = crop.resize((crop.width * 3, crop.height * 3), Image.LANCZOS)
+            zp = path.replace(".png", "_acc.png")
+            crop.save(zp)
+            acc = agent_account(ocr(zp)["lines"])
+            if acc:
                 break
-        if pos:
-            break
-    if pos:
-        log(f"→ seller-login 选分区「全球」@ {pos}")
-        click(w, pos)
-        # 轮询等页面离开"选分区"状态（redirect 链可能 >6s）
-        for _ in range(4):
             time.sleep(2)
-            lines = ocr_lines(shot(w, "reauth-wait"))
-            if not any("全球" in l["text"].replace(" ", "") and l["x"] > 900 for l in lines):
-                log("→ 选分区已通过，页面已跳转")
-                break
-        else:
-            # 该页对鼠标合成点击免疫 → 键盘战术（2026-10-13 实测 Tab×4+Enter 有效）
-            log("→ 点击无效，改键盘 Tab×4+Enter")
-            r0 = w.rectangle()
-            human_click(r0.left + 600, r0.top + 250, activate_window=w)
-            time.sleep(0.3)
-            type_keys("{TAB}" * 4)
-            time.sleep(0.15)
-            type_keys("{ENTER}")
-            time.sleep(3)
-            lines = ocr_lines(shot(w, "reauth-kb"))
-            if any("全球" in l["text"].replace(" ", "") and l["x"] > 900 for l in lines):
-                log("⚠ 键盘也未通过选分区（需要人工）")
-    # ② 中途确认按钮
-    for kw in ["确认登录", "同意并登录"]:
-        p = find(lines, [kw, kw[:-1]], exact=True, xmin=900)
-        if p:
-            log(f"→ 点「{kw}」@ {p}")
-            click(w, p)
-            time.sleep(5)
-            break
-    # ③ auth 地区选择页：「中国地区」（轮询出现）
-    for _ in range(6):
-        pos = find(lines, "中国地区", xmin=400)
-        if pos:
-            break
-        time.sleep(2)
-        lines = ocr_lines(shot(w, "reauth2"))
-    if pos:
-        log(f"→ auth 地区页点「中国地区」@ {pos}")
-        click(w, pos)
-        time.sleep(8)
-        return True
-    log("→ 未出现地区选择页（可能已自动联动）")
+            path = shot(w, "target2")
+            lines = ocr_lines(path)
+            acc = agent_account(lines)
+    return acc, sync_buttons(lines), lines
+
+
+def wait_customize_tab(w, timeout=30):
+    """正常链路通过后，系统会自动开「定制商品内容」标签——等它出现并切换。
+    （2026-10-13 用户指点的正确逻辑：不直接输 URL，跟随点击流进主页/开标签。）"""
+    for _ in range(timeout // 2):
+        try:
+            uia_shell.switch_tab(w, "定制商品")
+            return True
+        except RuntimeError:
+            time.sleep(2)
     return False
+
+
+def find_line(lines, kw, xmin=0):
+    """返回 OCR 行对象（含 x/y/w/h），找不到返回 None。弹窗文字用 xmin=0。"""
+    kws = kw if isinstance(kw, list) else [kw]
+    for l in lines:
+        t = l["text"].replace(" ", "")
+        if l["x"] < xmin:
+            continue
+        for k in kws:
+            if k.replace(" ", "") in t:
+                return l
+    return None
+
+
+def _has_captcha(lines):
+    text = " ".join(l["text"].replace(" ", "") for l in lines)
+    return any(k in text for k in ["滑块", "拼图", "请向右滑"])
+
+
+def _click_blue_left_of(w, ref_line):
+    """点 ref_line（如「不切换」）左侧的蓝色实心按钮（白字蓝底 OCR 读不出文字，
+    用像素级蓝色块检测）。2026-10-13 实测：确认切换按钮在「不切换」左侧 ~150px。"""
+    from PIL import Image
+    path = shot(w, "bluebtn")
+    img = Image.open(path).convert("RGB")
+    px = img.load()
+    y0, y1 = max(0, ref_line["y"] - 45), ref_line["y"] + ref_line["h"] + 45
+    x1 = ref_line["x"] - 5
+    cols = {}
+    for x in range(700, x1, 3):
+        cnt = sum(1 for y in range(y0, y1, 3)
+                  if px[x, y][2] > 170 and px[x, y][2] - px[x, y][0] > 60 and px[x, y][2] - px[x, y][1] > 30)
+        if cnt >= 5:
+            cols[x] = cnt
+    blocks, xs = [], sorted(cols)
+    if xs:
+        cur = [xs[0], xs[0]]
+        for x in xs[1:]:
+            if x - cur[1] <= 6:
+                cur[1] = x
+            else:
+                blocks.append(tuple(cur))
+                cur = [x, x]
+        blocks.append(tuple(cur))
+    cands = [b for b in blocks if 60 <= b[1] - b[0] <= 420]
+    if not cands:
+        return False
+    b = max(cands, key=lambda t: t[1])  # 离「不切换」最近的块
+    cx, cy = (b[0] + b[1]) // 2, ref_line["y"] + ref_line["h"] // 2
+    log(f"→ 蓝色按钮像素定位 x{b[0]}-{b[1]} → 点击 ({cx},{cy})")
+    click(w, (cx, cy))
+    return True
+
+
+def _seller_name(lines):
+    """seller 主页右上角的当前卖家账号名（大字，OCR 稳定可读；比授权卡标题可靠）。"""
+    import re
+    for l in lines:
+        if l["x"] > 2200 and 100 < l["y"] < 250:
+            m = re.search(r"[A-Za-z][A-Za-z0-9]{4,}", l["text"])
+            if m and m.group(0).lower() not in ("seller", "temu", "beta"):
+                return m.group(0)
+    return None
+
+
+def _norm_name(s):
+    """账号名 OCR 归一化：№→li（boliooZ 常被读成 bo№oZ）、I/1→l、0→o，去非字母数字。"""
+    import re
+    t = s.replace("№", "li").replace("I", "l").replace("1", "l").replace("0", "o")
+    return re.sub(r"[^a-z]", "", t.lower())
+
+
+def _name_eq(a, b):
+    if not a or not b:
+        return False
+    na, nb = _norm_name(a), _norm_name(b)
+    if na == nb:
+        return True
+    import difflib
+    return difflib.SequenceMatcher(None, na, nb).ratio() >= 0.8
+
+
+def _store_name_from(lines):
+    """从授权卡/确认切换弹窗的 OCR 里抓目标店名（兜底，主源是 seller 主页头部）。
+    OCR 会把「」读成 f/J 等，正则容忍各种括号字形。"""
+    import re
+    text = "".join(l["text"].replace(" ", "") for l in lines)
+    m = re.search(r"的[「fF\[\(\{]([A-Za-z0-9№lI]{2,12})[」jJ\]\)\}]店", text)
+    if m:
+        return m.group(1)
+    for i, l in enumerate(lines):
+        if "即将切换为" in l["text"].replace(" ", ""):
+            for l2 in lines[i + 1:]:
+                m2 = re.search(r"[A-Za-z0-9№][A-Za-z0-9№lI]{4,}", l2["text"])
+                if m2 and m2.group(0).lower() not in ("seller", "temu"):
+                    return m2.group(0)
+    return None
+
+
+def link_agent_center(w):
+    """Agent Center 联动/重授权（2026-10-13 用户流程实测定稿，全程程序可操作）：
+    seller 主页 → 侧边栏「商品管理」展开 →「定制商品内容」→ 页面弹授权卡
+    「即将前往 SellerCentral（全球）的「X」店铺」（勾协议 →「确认授权并前往」）
+    →（Agent Center 挂着别店时）「确认切换」弹窗 → 定制商品内容页打开。
+    坐标全部 OCR 实时定位；「不切换」绝不点。
+    返回 (状态, 店名)：状态 'ok'/'captcha'/'fail'；店名从授权卡/切换弹窗抓取
+    （右上角账号名小字 OCR 常漏读，以链路上读到的名字为兜底真值）。
+    （旧 settle/seller-login 表单路径已废弃：其提交按钮对合成输入免疫，2026-10-13 实测。）"""
+    log("→ Agent Center 联动链路：seller 主页 → 商品管理 → 定制商品内容")
+    uia_shell.navigate(w, SELLER_MAIN_URL)
+    time.sleep(6)
+    consent_done = False
+    store_name = None
+    gm_clicks = 0
+    for i in range(8):
+        lines = ocr_lines(shot(w, f"link{i}"))
+        if _dismiss_save_pwd(w, lines):
+            time.sleep(1)
+            continue  # 关掉气泡后重新观察
+        if _has_captcha(lines):
+            log("✋ 出现滑块验证码（红线：不自动处理）")
+            return "captcha", store_name
+        if store_name is None:
+            nm = _seller_name(lines) or _store_name_from(lines)
+            if nm:
+                store_name = nm
+                log(f"→ 链路读到目标店名: {store_name}")
+        # ① 「确认切换」弹窗：按钮是白字蓝底（OCR 只能读到标题「…确认切换吗」和
+        #    深色的「不切换」）→ 用「不切换」行定位，点其左侧蓝色按钮。绝不点「不切换」。
+        if find_line(lines, "确认切换") and find_line(lines, "不切换"):
+            log("→ 「确认切换」弹窗，像素定位蓝色确认按钮")
+            if not _click_blue_left_of(w, find_line(lines, "不切换")):
+                log("⚠ 未定位到确认切换按钮")
+            time.sleep(8)
+            continue
+        # ② 授权卡（勾协议 → 确认授权并前往）
+        btn = find_line(lines, "确认授权并前往")
+        if btn:
+            cb = find_line(lines, ["板块共享", "已阅读并同意"])
+            if cb and not consent_done:
+                log("→ 勾选授权协议")
+                click(w, (cb["x"] - 28, cb["y"] + cb["h"] // 2))  # 勾选框在行首左侧~28px
+                consent_done = True
+                time.sleep(2)
+            log("→ 点「确认授权并前往」")
+            click(w, (btn["x"] + btn["w"] // 2, btn["y"] + btn["h"] // 2))
+            time.sleep(8)
+            continue
+        # ③ 侧边栏「定制商品内容」入口
+        side = find_line(lines, "定制商品内容")
+        if side and side["x"] < 300:
+            log("→ 侧边栏点「定制商品内容」")
+            click(w, (side["x"] + 70, side["y"] + side["h"] // 2))
+            time.sleep(5)
+            continue
+        # ④ 侧边栏「商品管理」未展开 → 先展开（最多 2 次，防后台开标签后死循环点）
+        gm = find_line(lines, "商品管理")
+        if gm and gm["x"] < 300 and gm_clicks < 2:
+            log("→ 侧边栏点「商品管理」展开")
+            click(w, (gm["x"] + 45, gm["y"] + gm["h"] // 2))
+            gm_clicks += 1
+            time.sleep(2)
+            continue
+        break  # 无可操作元素 → 等定制商品标签
+    if wait_customize_tab(w, timeout=30):
+        log("→ 「定制商品内容」标签已打开，切换验证")
+        return "ok", store_name
+    log("→ 未等到定制商品标签")
+    return "fail", store_name
 
 
 def check_only():
@@ -300,7 +497,7 @@ def main():
     # 已经在目标店？直接验证（流畅度优化：免登录）
     acc, (b1, b2), _ = check_target(w)
     expected = ACCOUNT_NAME.get(store_id)
-    if expected and acc == expected and b1 and b2:
+    if expected and _name_eq(acc, expected) and b1 and b2:
         log(f"已在目标店（{acc}，双按钮✅），免登录直达")
         report.write_report("store-switch", True,
                             [f"店铺: {store_id}（已在目标店，未重新登录）",
@@ -334,30 +531,38 @@ def main():
     # Agent Center 验证 + 联动（按页面状态判断，不依赖已知账号名——store-c 首登时名字未知）
     acc, (b1, b2), lines = check_target(w)
     on_auth = find(lines, ["中国地区", "商家中心"], xmin=600) is not None and b1 is None
-    need = on_auth or (expected is not None and acc != expected)
+    # 未知店（expected=None）读到的是别家已知店名 → 同样必须联动，防跑错店
+    known_others = {v for k, v in ACCOUNT_NAME.items() if k != store_id}
+    need = on_auth or (expected is not None and not _name_eq(acc, expected)) \
+        or (expected is None and any(_name_eq(acc, o) for o in known_others))
+    linked_name = None
     if need:
-        log(f"→ 需要联动（on_auth={on_auth}, acc={acc}, expected={expected}），走重授权…")
-        reauth_agent_center(w)
+        log(f"→ 需要联动（on_auth={on_auth}, acc={acc}, expected={expected}），走联动链路…")
+        rc, linked_name = link_agent_center(w)
+        if rc == "captcha":
+            report.write_report("store-switch", False,
+                                [f"店铺: {store_id}", "结果: 重授权出现滑块验证码，需人工滑一次",
+                                 "人工在浏览器完成滑块后重跑本任务即可（红线：程序绝不碰验证码）"])
+            raise SystemExit(2)
         time.sleep(2)
         acc, (b1, b2), lines = check_target(w)
-    if expected is not None and acc != expected:
+        if acc is None and linked_name:
+            acc = linked_name  # 右上角小字漏读 → 用授权链路上读到的店名
+    if expected is not None and not _name_eq(acc, expected):
         on_auth_now = find(lines, ["中国地区"], xmin=400) is not None
         report.write_report("store-switch", False,
                             [f"店铺: {store_id}",
-                             "结果: ⚠️ 卡在 Agent Center 授权页（该页对自动点击免疫）" if on_auth_now
-                             else f"结果: seller 已登录但 Agent Center 仍为 {acc or '未知'}",
-                             "人工恢复（10 秒）: 浏览器当前页面用鼠标点「商家中心」卡片，之后重跑本任务" if on_auth_now
-                             else "重授权入口未生效，需人工检查"])
+                             f"结果: seller 已登录但 Agent Center 仍为 {acc or '未知'}（预期 {expected}）",
+                             "请看截图核对页面状态；重跑一次本任务通常可恢复"])
         raise SystemExit(3)
 
     ok = bool(b1 and b2)
-    on_auth_final = find(lines, ["中国地区"], xmin=400) is not None and not b1
     if not ok:
-        extra = ("结果: ⚠️ 卡在 Agent Center 授权页（该页对自动操作免疫）",
-                 "人工恢复（10 秒）: 在浏览器当前页面用鼠标点一下「商家中心」卡片即可，之后重跑本任务") \
-            if on_auth_final else ("结果: 双按钮未出现（页面状态异常，见截图）",)
-        report.write_report("store-switch", False, [f"店铺: {store_id}", *extra])
+        report.write_report("store-switch", False,
+                            [f"店铺: {store_id}", "结果: 双按钮未出现（页面状态异常，见截图）"])
         raise SystemExit(3)
+    if expected is None and store_id not in ACCOUNT_NAME:
+        _learn_name(store_id, acc or linked_name)  # 首登学习店名（下次严格校验）
     lines = [
         f"店铺: {store_id}",
         f"账号: {acc or (expected or '新店（账号名已记录在截图）')}",
@@ -371,4 +576,5 @@ def main():
 
 
 if __name__ == "__main__":
+    _load_names()
     main()
