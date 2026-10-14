@@ -76,3 +76,42 @@ seller 主页 site-main
 ## 红线执行记录
 
 全程未点击「按勾选同步」「忆托ERP同步」；未碰任何验证码；密码未进日志/报告（仅 type_keys 直输）。
+
+## 2026-10-14 事故定论（切 main 卡 15 分钟三连败，五个独立根因）
+
+| 时间 | 症状 | 根因 | 修复 |
+|---|---|---|---|
+| 06:46/06:48 | failpage ×2 | OCR 子进程：Git Bash 环境裸 `powershell` 不在 PATH → ocr_lines 吞异常返回空 → 假 failpage | shot.py 改 PowerShell 全路径 + `os.path.abspath`（WinRT 只认反斜杠）+ UTF-8 解码 |
+| 06:56 | 双按钮未出现 | OCR 把「商品管理」读成「商管理」→ 联动断链；但**上一店旧「定制商品内容」标签还在**，wait_customize_tab 误判成功 → F5 后仍是旧店 | ① find_line_fuzzy 相似度 ≥0.8 兜底；② 成功判定要求"本轮点过授权卡/确认切换/侧边栏入口，或出现**新**定制标签"，旧标签不算 |
+| 07:13 | 链路 8 轮空转 | 消息面板对 Esc 无反应，Esc 分支每轮 `continue` → 饿死侧边栏逻辑，「商品管理」永远点不到 | Esc 最多按 2 次、**不 continue**（面板在右侧，侧边栏 x<300 不受遮挡，链路照走） |
+| 全天 | **双按钮全消失**（三店验证必败） | **Edge 大版本更新（155.x）关闭开发人员模式并整批卸载解压插件**（佳同/忆托/妙手都没了，edge://extensions 显示"未安装扩展"） | `driver/restore_extensions.py` 一键恢复（UI 法重开 dev mode + 重载三插件）；`--doctor` 增加插件在位检查；以后 Edge 每次大更新后跑一次 doctor |
+| 07:20 | 无辜失败 ×2 | 工作台残留的 headless 任务还在跑 `switch_store main`，与新任务**并发抢浏览器**互相导航 | switch_store 加 `.switch-lock` 文件锁（15 分钟自动过期），同刻只允许一个切店进程 |
+
+另修：授权卡最多点 2 次（连点只会狂开后台标签，07:24 实测 ×6 无效）；「确认切换」
+弹窗可能开在**授权后新开的后台标签**里——现在每轮检查新标签并切过去处理，循环兜底
+再全标签扫一遍；成功后自动关掉多开的重复定制页标签。
+
+教训：**循环里的"处理弹层"分支绝不能无条件 continue**——必须保证主链路每轮都有机会前进；
+**"标签已存在"永远不能当成功证据**，成功必须绑定"本轮执行过动作"或"新元素出现"；
+**环境依赖（插件/OCR）要先自检再干活**；**同一浏览器同一时刻只能有一个自动化进程**。
+
+## 新店接入 SOP（加第 4+ 家店铺，免改任何代码）
+
+1. `local.config.json` 的 `accounts` 里加一项：`"store-d": {"phone": "15x…", "password": "…"}`
+   （手机号+密码即可；`name` 留空，首登成功后脚本自动学习写回）
+2. `python driver/switch_store.py --doctor` —— 环境自检（OCR 管线/窗口/新店凭据/同步插件）全绿再继续
+3. `python driver/switch_store.py store-d` —— 首切：自动登录→联动授权→学习店名→严格验证
+4. `python driver/switch_store.py --verify-all` —— 全店轮回实测（含新店），矩阵全 ✅ 即接入完成
+5. 工作台（temu-panel）店铺卡片从 local.config.json 动态生成，重启工作台即出现新店按钮
+
+原理：新店首登时 expected=None，脚本读到**别家已知店名也强制走联动**（防跑错店）；
+成功后 `_learn_name` 把店名写进配置，此后与老店完全同权（严格校验+免登录直达）。
+
+## 环境依赖备忘（切店"没用但页面没毛病"时先查这里）
+
+| 依赖 | 症状 | 自查/恢复 |
+|---|---|---|
+| 同步插件（佳同/忆托/妙手，解压加载自 `Desktop\cross\`） | 双按钮全消失，所有店验证 exit 3 | `--doctor` 第 4 项；`python driver/restore_extensions.py` |
+| 开发人员模式 | 同上（插件被 Edge 更新整批卸载的根源） | edge://extensions 左下角开关；红线：绝不关闭它 |
+| PowerShell OCR 管线 | failpage 假失败（OCR 返回空） | `--doctor` 第 1 项（合成图端到端验证） |
+| 唯一进程锁 | 两个任务互相把对方页面导航走 | `driver/.switch-lock`；卡死 15 分钟自动过期 |

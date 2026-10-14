@@ -59,9 +59,16 @@ def ocr(path: str) -> dict:
 
     坐标为相对截图（物理像素）的左上/右下角框。
     """
+    # powershell 全路径：Git Bash 等环境 PATH 无 WindowsPowerShell 目录，
+    # 裸 "powershell" 会 FileNotFoundError → ocr_lines 吞异常返回 [] → 假 failpage
+    ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    if not os.path.exists(ps):
+        ps = "powershell"
+    # WinRT GetFileFromPathAsync 只认反斜杠路径，正斜杠会抛 AggregateException
     out = subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", OCR_PS, "-ImagePath", path],
+        [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", OCR_PS, "-ImagePath", os.path.abspath(path)],
         capture_output=True, text=True, timeout=60,
+        encoding="utf-8", errors="replace",  # PS 输出 UTF-8；默认 GBK 解码会炸
     )
     if out.returncode != 0:
         raise RuntimeError(f"OCR 失败: {out.stderr.strip()[:400]}")

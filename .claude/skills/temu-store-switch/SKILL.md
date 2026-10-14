@@ -8,18 +8,31 @@ description: TEMU 店铺切换（账号切换式多店铺）。核心是运行�
 ## 首选：直接跑脚本（快而稳，~115-145 秒/店）
 
 ```
-python D:\temu-agent\driver\switch_store.py <store-id>    # main / store-b / store-c
+python D:\temu-agent\driver\switch_store.py <store-id>    # main / store-b / store-c / …（配置里的都行）
 python D:\temu-agent\driver\switch_store.py --check       # 只看当前在哪店
+python D:\temu-agent\driver\switch_store.py --doctor      # 环境自检（OCR/窗口/凭据/同步插件，不登录）
+python D:\temu-agent\driver\switch_store.py --verify-all  # 全店轮回实测（加新店后必跑）
 ```
 
 脚本内含完整流程（详见 discoveries/store-switch.md）：
 登录（Tab 密码法 + 同意并登录 + 关闭 Edge 保存密码气泡）
 → Agent Center 联动（seller 主页 → 商品管理 → 定制商品内容 → 勾协议 → 确认授权并前往
-   → 确认切换弹窗蓝色按钮像素定位）→ 店名 + 双按钮验证 → 中文报告。
-三店均已打通（main=hpoiZee / store-b=boliooZ / store-c=lecoddebujbrjq），
-首登店名自动学习写进 local.config.json。
+   → 确认切换弹窗——含后台新标签里的，蓝色按钮像素定位；失败自动重试一次）
+→ 店名 + 双按钮验证 → 中文报告。
+同一时刻只允许一个切店进程（文件锁 driver/.switch-lock，15 分钟过期）。
 
 退出码：0 成功 / 1 页面异常 / 2 验证码或账密错 / 3 验证失败（重跑一次通常恢复）。
+
+## 环境出问题时（双按钮全消失 / 全部 failpage）
+
+先 `--doctor`：OCR 管线、各店凭据、**同步插件在位**（Edge 大版本更新会把解压插件
+整批卸掉——2026-10-14 事故）都查。缺插件跑 `python driver/restore_extensions.py` 恢复。
+
+## 加新店铺（免改代码）
+
+1. `local.config.json` → `accounts` 加 `"store-d": {"phone": "...", "password": "..."}`（name 留空自动学）
+2. `--doctor` 全绿 → 3. 首切 `store-d` → 4. `--verify-all` 全店矩阵全 ✅ 即接入完成
+（工作台店铺卡从配置动态生成，重启工作台即出现新店按钮；详见 discoveries/store-switch.md「新店接入 SOP」）
 
 ## 结果处理
 

@@ -2,6 +2,8 @@
 
 用法：python switch_store.py <store-id>          # 切店 + 定制商品页双按钮验证
       python switch_store.py <store-id> --check  # 只检查当前在哪店（不登录）
+      python switch_store.py --doctor            # 环境自检（OCR/窗口/凭据，不登录）
+      python switch_store.py --verify-all        # 所有配置店铺轮回切换实测（加新店后跑这个）
 
 凭据：D:\\temu-agent\\local.config.json 的 accounts.<id>（手机号+密码，绝不打印）。
 
@@ -289,15 +291,26 @@ def check_target(w, navigate=True):
     return acc, sync_buttons(lines), lines
 
 
-def wait_customize_tab(w, timeout=30):
+def wait_customize_tab(w, timeout=30, tabs_before=None, allow_any=False):
     """正常链路通过后，系统会自动开「定制商品内容」标签——等它出现并切换。
-    （2026-10-13 用户指点的正确逻辑：不直接输 URL，跟随点击流进主页/开标签。）"""
-    for _ in range(timeout // 2):
+    （2026-10-13 用户指点的正确逻辑：不直接输 URL，跟随点击流进主页/开标签。）
+    成功判定（2026-10-14 修复）：allow_any=True（本轮真点过授权卡/确认切换/侧边栏
+    入口）时，新旧定制标签都算数（授权后旧标签会按新授权重载）；否则必须是
+    **新出现**的标签——上一店遗留的旧标签绝不能当成功（06:56 误判事故根因）。"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
         try:
-            uia_shell.switch_tab(w, "定制商品")
-            return True
+            tabs_now = uia_shell.tabs(w)
+            fresh = [t for t in tabs_now if "定制商品" in (t or "") and
+                     (tabs_before is None or allow_any or t not in tabs_before)]
+            if fresh:
+                uia_shell.switch_tab(w, "定制商品")
+                return True
         except RuntimeError:
-            time.sleep(2)
+            pass
+        except Exception:
+            pass
+        time.sleep(2)
     return False
 
 
@@ -312,6 +325,26 @@ def find_line(lines, kw, xmin=0):
             if k.replace(" ", "") in t:
                 return l
     return None
+
+
+def find_line_fuzzy(lines, kw, xmin=0, ratio=0.8):
+    """find_line 的 OCR 容错版：子串不中时按相似度兜底
+    （实测「商品管理」会被误读成「商管理」，掉一个字整条联动链路就断）。"""
+    hit = find_line(lines, kw, xmin=xmin)
+    if hit:
+        return hit
+    from difflib import SequenceMatcher
+    kws = kw if isinstance(kw, list) else [kw]
+    best, best_r = None, 0.0
+    for l in lines:
+        if l["x"] < xmin:
+            continue
+        t = l["text"].replace(" ", "")
+        for k in kws:
+            r = SequenceMatcher(None, k.replace(" ", ""), t).ratio()
+            if r > best_r:
+                best, best_r = l, r
+    return best if best_r >= ratio else None
 
 
 def _has_captcha(lines):
@@ -399,6 +432,42 @@ def _store_name_from(lines):
     return None
 
 
+def _find_checkbox(w, policy_line):
+    """授权卡协议勾选框像素定位：政策行上方的浅灰描边空心方框（10-26px 宽，
+    上下边沿成对）。2026-10-14 教训：框相对文字行首的偏移会漂（-28px 经验值在
+    store-b 卡上点在框外 19px，勾选失败 → 按钮点了没反应）。找不到返回 None
+    （调用方回退 -28px 老经验值——10-13 与 07:21 两张卡实测该值有效）。"""
+    from PIL import Image
+    path = shot(w, "cbx")
+    img = Image.open(path).convert("RGB")
+    px = img.load()
+    ty = policy_line["y"] + policy_line["h"] // 2
+    tx = policy_line["x"]
+
+    def edge(x, y):
+        v = (px[x, y][0] + px[x, y][1] + px[x, y][2]) // 3
+        return 195 < v < 247  # 浅灰描边（219-233 实测）；白底 251+，正文/遮罩更深
+
+    runs = []
+    x = max(760, tx - 110)
+    while x < tx + 30:
+        if edge(x, ty - 11):
+            xa = x
+            while x < tx + 30 and edge(x, ty - 11):
+                x += 1
+            runs.append((xa, x - 1))
+        else:
+            x += 1
+    for xa, xb in runs:
+        width = xb - xa + 1
+        if not (10 <= width <= 26):
+            continue
+        bot = sum(1 for xx in range(xa, xb + 1) if edge(xx, ty + 6))
+        if bot >= max(5, width - 4):
+            return ((xa + xb) // 2, ty - 2)
+    return None
+
+
 def link_agent_center(w):
     """Agent Center 联动/重授权（2026-10-13 用户流程实测定稿，全程程序可操作）：
     seller 主页 → 侧边栏「商品管理」展开 →「定制商品内容」→ 页面弹授权卡
@@ -407,14 +476,47 @@ def link_agent_center(w):
     坐标全部 OCR 实时定位；「不切换」绝不点。
     返回 (状态, 店名)：状态 'ok'/'captcha'/'fail'；店名从授权卡/切换弹窗抓取
     （右上角账号名小字 OCR 常漏读，以链路上读到的名字为兜底真值）。
+    成功判定（2026-10-14 修复）：必须「执行过授权动作」或「出现了新的定制商品标签」——
+    上一店留下的旧标签绝不算成功（否则误判后 F5 仍是旧店，白跑一次登录）。
     （旧 settle/seller-login 表单路径已废弃：其提交按钮对合成输入免疫，2026-10-13 实测。）"""
     log("→ Agent Center 联动链路：seller 主页 → 商品管理 → 定制商品内容")
+    try:
+        tabs_before = set(uia_shell.tabs(w))
+        n_before = len(uia_shell.tab_items(w))
+    except Exception:
+        tabs_before, n_before = set(), 1
     uia_shell.navigate(w, SELLER_MAIN_URL)
     time.sleep(6)
     consent_done = False
+    acted = False  # 本轮链路是否真的点了授权卡/确认切换（成功判定的必要条件之一）
+    entered = False  # 点过侧边栏「定制商品内容」（Agent Center 已授权时直达，无授权卡）
+    dialog_done = False  # 「确认切换」弹窗已处理
+    auth_clicks = 0
     store_name = None
     gm_clicks = 0
-    for i in range(8):
+    esc_tries = 0
+    for i in range(10):
+        # ⓪ 新后台标签检查：「确认切换」弹窗常开在授权后新开的标签里（2026-10-14
+        #    main 实测：对着 seller 页连点授权卡毫无用处，弹窗其实在后台等人确认）
+        if acted and not dialog_done:
+            try:
+                n_now = len(uia_shell.tab_items(w))
+            except Exception:
+                n_now = n_before
+            if n_now > n_before:
+                log(f"→ 出现新标签（{n_before}→{n_now}），切过去找「确认切换」弹窗")
+                uia_shell.switch_tab_index(w, -1)
+                time.sleep(2)
+                lines2 = ocr_lines(shot(w, f"sw{i}"))
+                sw_line = find_line(lines2, "不切换")
+                if sw_line and find_line(lines2, "确认切换"):
+                    log("→ 后台标签里的「确认切换」弹窗，像素定位蓝色确认按钮")
+                    if _click_blue_left_of(w, sw_line):
+                        dialog_done = True
+                    time.sleep(8)
+                    continue
+                uia_shell.switch_tab_index(w, 0)  # 不是弹窗 → 回 seller 页继续
+                time.sleep(1.5)
         lines = ocr_lines(shot(w, f"link{i}"))
         if _dismiss_save_pwd(w, lines):
             time.sleep(1)
@@ -422,41 +524,60 @@ def link_agent_center(w):
         if _has_captcha(lines):
             log("✋ 出现滑块验证码（红线：不自动处理）")
             return "captcha", store_name
+        # 消息面板下拉会遮挡右上角 → 尝试 Esc 关闭。注意（2026-10-14 教训）：
+        # ① 面板对 Esc 可能无反应，所以最多按 2 次就放弃；
+        # ② 绝不因它 continue——侧边栏在左侧不被遮挡，链路必须继续走，
+        #    否则 8 轮循环全耗在按 Esc 上，商品管理永远点不到（07:13 事故根因）。
+        if esc_tries < 2 and find_line(lines, ["全部消息", "标记为已读"]):
+            log("→ 消息面板开着，按 Esc 尝试关闭（不阻塞链路）")
+            w.set_focus()
+            type_keys("{ESC}")
+            esc_tries += 1
+            time.sleep(1.0)
         if store_name is None:
             nm = _seller_name(lines) or _store_name_from(lines)
             if nm:
                 store_name = nm
                 log(f"→ 链路读到目标店名: {store_name}")
-        # ① 「确认切换」弹窗：按钮是白字蓝底（OCR 只能读到标题「…确认切换吗」和
-        #    深色的「不切换」）→ 用「不切换」行定位，点其左侧蓝色按钮。绝不点「不切换」。
+        # ① 「确认切换」弹窗（出现在当前页时）：按钮是白字蓝底（OCR 只能读到标题
+        #    「…确认切换吗」和深色的「不切换」）→ 用「不切换」行定位，点其左侧蓝色
+        #    按钮。绝不点「不切换」。
         if find_line(lines, "确认切换") and find_line(lines, "不切换"):
             log("→ 「确认切换」弹窗，像素定位蓝色确认按钮")
             if not _click_blue_left_of(w, find_line(lines, "不切换")):
                 log("⚠ 未定位到确认切换按钮")
+            acted = True
+            dialog_done = True
             time.sleep(8)
             continue
-        # ② 授权卡（勾协议 → 确认授权并前往）
+        # ② 授权卡（勾协议 → 确认授权并前往）。最多点 2 次：点过后弹窗/新标签需要
+        #    时间出现，连点只会开一堆后台标签（2026-10-14 main 实测连点 ×6 无效）
         btn = find_line(lines, "确认授权并前往")
-        if btn:
+        if btn and auth_clicks < 2:
             cb = find_line(lines, ["板块共享", "已阅读并同意"])
             if cb and not consent_done:
-                log("→ 勾选授权协议")
-                click(w, (cb["x"] - 28, cb["y"] + cb["h"] // 2))  # 勾选框在行首左侧~28px
+                pos = _find_checkbox(w, cb) or (cb["x"] - 28, cb["y"] + cb["h"] // 2)
+                log(f"→ 勾选授权协议（框像素定位 {pos}）")
+                click(w, pos)
                 consent_done = True
                 time.sleep(2)
             log("→ 点「确认授权并前往」")
             click(w, (btn["x"] + btn["w"] // 2, btn["y"] + btn["h"] // 2))
+            acted = True
+            auth_clicks += 1
             time.sleep(8)
             continue
-        # ③ 侧边栏「定制商品内容」入口
-        side = find_line(lines, "定制商品内容")
+        # ③ 侧边栏「定制商品内容」入口（fuzzy：OCR 常掉字，如「定制商品内空」）
+        side = find_line_fuzzy(lines, "定制商品内容")
         if side and side["x"] < 300:
             log("→ 侧边栏点「定制商品内容」")
             click(w, (side["x"] + 70, side["y"] + side["h"] // 2))
+            entered = True
             time.sleep(5)
             continue
         # ④ 侧边栏「商品管理」未展开 → 先展开（最多 2 次，防后台开标签后死循环点）
-        gm = find_line(lines, "商品管理")
+        #    fuzzy：实测 OCR 把「商品管理」读成「商管理」，硬匹配整条链路就断在这
+        gm = find_line_fuzzy(lines, "商品管理")
         if gm and gm["x"] < 300 and gm_clicks < 2:
             log("→ 侧边栏点「商品管理」展开")
             click(w, (gm["x"] + 45, gm["y"] + gm["h"] // 2))
@@ -464,11 +585,66 @@ def link_agent_center(w):
             time.sleep(2)
             continue
         break  # 无可操作元素 → 等定制商品标签
-    if wait_customize_tab(w, timeout=30):
+    # 兜底：全标签扫一遍「确认切换」（双击开的多个新标签里可能还藏着弹窗）
+    if acted and not dialog_done:
+        try:
+            items = uia_shell.tab_items(w)
+        except Exception:
+            items = []
+        for idx in range(len(items) - 1, -1, -1):
+            try:
+                uia_shell.switch_tab_index(w, idx)
+            except Exception:
+                continue
+            time.sleep(1.2)
+            lines2 = ocr_lines(shot(w, f"sweep{idx}"))
+            sw_line = find_line(lines2, "不切换")
+            if sw_line and find_line(lines2, "确认切换"):
+                log(f"→ 标签[{idx}] 有「确认切换」弹窗，确认")
+                _click_blue_left_of(w, sw_line)
+                dialog_done = True
+                time.sleep(8)
+                break
+    if wait_customize_tab(w, timeout=30, tabs_before=tabs_before,
+                          allow_any=(acted or entered)):
         log("→ 「定制商品内容」标签已打开，切换验证")
+        _close_extra_tabs(w, n_before)
         return "ok", store_name
-    log("→ 未等到定制商品标签")
+    if not acted and not entered:
+        log("→ 联动链路未执行任何授权动作（侧边栏定位失败？），判失败")
+    else:
+        log("→ 未等到定制商品标签")
     return "fail", store_name
+
+
+def _close_extra_tabs(w, n_before, rounds=6):
+    """收掉本轮联动多开的重复「定制商品内容」标签（只留一个）。
+    只关标题完全重复的定制页——绝不碰 seller 页和唯一的那张定制页。"""
+    from input import type_keys as _tk
+    for _ in range(rounds):
+        try:
+            items = uia_shell.tab_items(w)
+        except Exception:
+            return
+        titles = [t.window_text() or "" for t in items]
+        if len(items) <= n_before or len(titles) <= 1:
+            return
+        dup = None
+        for idx in range(len(titles) - 1, -1, -1):
+            if "定制商品" in titles[idx] and titles.count(titles[idx]) > 1:
+                dup = idx
+                break
+        if dup is None:
+            return
+        log(f"→ 关掉多余的定制页标签[{dup}]")
+        try:
+            uia_shell.switch_tab_index(w, dup)
+            time.sleep(0.8)
+            w.set_focus()
+            _tk("^w")
+            time.sleep(1.2)
+        except Exception:
+            return
 
 
 def check_only():
@@ -481,12 +657,95 @@ def check_only():
     return 0
 
 
-def main():
-    if "--check" in sys.argv:
-        raise SystemExit(check_only())
-    if len(sys.argv) < 2:
-        raise SystemExit(__doc__)
-    store_id = sys.argv[1]
+def doctor():
+    """环境自检（不登录、不点页面）：OCR 管线 / Edge 窗口 / 各店凭据与已学店名 /
+    同步插件在位。加新店后先跑这个，全绿再切。"""
+    print("== 环境自检 ==")
+    problems = 0
+    # 1) OCR 管线端到端（合成图片，不碰浏览器）
+    try:
+        from PIL import Image, ImageDraw
+        img = Image.new("RGB", (600, 120), "white")
+        d = ImageDraw.Draw(img)
+        d.text((20, 40), "TEST 151 OK", fill="black")
+        p = os.path.join(os.environ.get("TEMP", "."), "sw-doctor.png")
+        img.save(p)
+        out = ocr(p)["lines"]
+        text = " ".join(l["text"] for l in out)
+        ok = "151" in text.replace(" ", "")
+        print(f"OCR 管线: {'✅' if ok else '❌'}（读到: {text!r}）")
+        if not ok:
+            problems += 1
+            print("  → 修复线索：driver/shot.py 需用 PowerShell 全路径 + 反斜杠 + UTF-8 解码")
+    except Exception as e:
+        problems += 1
+        print(f"OCR 管线: ❌ {type(e).__name__}: {e}")
+    # 2) Edge 窗口
+    w = winutil.default_window()
+    print(f"Edge 窗口: {'✅ hwnd=' + str(w.handle) if w else '⚠ 未找到（切店时会自动拉起）'}")
+    # 3) 各店凭据
+    try:
+        d = json.load(open(os.path.join(ROOT, "local.config.json"), encoding="utf-8"))
+        for sid, acc in d.get("accounts", {}).items():
+            if not isinstance(acc, dict):
+                continue
+            has = bool(acc.get("phone")) and bool(acc.get("password"))
+            nm = acc.get("name") or ACCOUNT_NAME.get(sid) or "（首登时自动学习）"
+            print(f"店铺 {sid}: 凭据 {'✅' if has else '❌ 缺 phone/password'} · 店名 {nm}")
+            if not has:
+                problems += 1
+    except Exception as e:
+        problems += 1
+        print(f"local.config.json: ❌ {type(e).__name__}: {e}")
+    # 4) 同步插件在位（2026-10-14 事故：Edge 大版本更新把解压插件整批卸了，
+    #    双按钮全消失 → 所有店验证必失败）。恢复：python driver/restore_extensions.py
+    try:
+        pref_dir = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data\Default")
+        blob = ""
+        for fn in ("Preferences", "Secure Preferences"):
+            try:
+                blob += open(os.path.join(pref_dir, fn), encoding="utf-8").read()
+            except OSError:
+                pass
+        need = [("佳同TEMU助手", "jiatong-temu"), ("忆托工具箱", "yishu-plugin"), ("妙手ERP", "miaoshou")]
+        have = [label for label, key in need if key in blob]
+        missing = [label for label, key in need if key not in blob]
+        if not missing:
+            print("同步插件: ✅ 佳同/忆托/妙手 全部在位")
+        else:
+            problems += 1
+            print(f"同步插件: ❌ 缺 {'/'.join(missing)} → 跑 python driver/restore_extensions.py 恢复")
+    except Exception as e:
+        print(f"同步插件: ⚠ 检查失败 {type(e).__name__}")
+    print(f"== 自检结束：{'✅ 全部通过' if problems == 0 else f'❌ {problems} 项异常'} ==")
+    return 0 if problems == 0 else 1
+
+
+def verify_all():
+    """全店轮回实测：按配置顺序切换到每一家并验证，输出矩阵报告。
+    加新店后跑这个，全 ✅ 才算接入完成。"""
+    d = json.load(open(os.path.join(ROOT, "local.config.json"), encoding="utf-8"))
+    stores = list(d.get("accounts", {}).keys())
+    log(f"== 全店轮回实测：{' → '.join(stores)} ==")
+    results, times = [], []
+    for sid in stores:
+        t0 = time.time()
+        rc = run_store(sid)
+        dt = time.time() - t0
+        results.append((sid, rc, dt))
+        log(f"── {sid}: exit={rc}（{dt:.0f}s）")
+        time.sleep(3)
+    lines = [f"{sid}: {'✅ 成功' if rc == 0 else '❌ exit=' + str(rc)}（{dt:.0f}s）"
+             for sid, rc, dt in results]
+    ok = all(rc == 0 for _, rc, _ in results)
+    lines.append("结论: " + ("所有店铺切换+验证全部通过 ✅" if ok else "存在失败店铺，见上 ❌"))
+    report.write_report("store-verify-all", ok, lines)
+    print("\n".join(lines))
+    return 0 if ok else 3
+
+
+def run_store(store_id):
+    """切到指定店 + 双按钮验证。返回退出码（0 成功）。"""
     phone, password = creds(store_id)
     log(f"== 切换到 {store_id}（手机号 {phone[:3]}****{phone[-2:]}）==")
     t0 = time.time()
@@ -504,7 +763,7 @@ def main():
                              f"账号: {acc}", "双按钮: 按勾选同步✅ 忆托ERP同步✅",
                              "未执行任何同步点击"])
         print("OK already-on-target")
-        return
+        return 0
     log(f"当前 Agent Center 账号: {acc or '未识别'} → 开始登录切换")
 
     # seller 登录
@@ -517,18 +776,18 @@ def main():
         report.write_report("store-switch", False,
                             [f"店铺: {store_id}", "结果: 登录出现验证码，需人工",
                              "截图已存，请人工完成后重跑"])
-        raise SystemExit(2)
+        return 2
     if rc == "authfail":
         log("✋ 账号或密码错误")
         report.write_report("store-switch", False, [f"店铺: {store_id}", "结果: 账号或密码错误"])
-        raise SystemExit(2)
+        return 2
     if rc:
         log(f"✋ 登录未成功（{rc}），截图取证")
         report.write_report("store-switch", False, [f"店铺: {store_id}", f"结果: 登录异常({rc})"])
-        raise SystemExit(1)
+        return 1
     log(f"seller 登录成功（{time.time()-t0:.0f}s）")
 
-    # Agent Center 验证 + 联动（按页面状态判断，不依赖已知账号名——store-c 首登时名字未知）
+    # Agent Center 验证 + 联动（按页面状态判断，不依赖已知账号名——新店首登时名字未知）
     acc, (b1, b2), lines = check_target(w)
     on_auth = find(lines, ["中国地区", "商家中心"], xmin=600) is not None and b1 is None
     # 未知店（expected=None）读到的是别家已知店名 → 同样必须联动，防跑错店
@@ -543,24 +802,33 @@ def main():
             report.write_report("store-switch", False,
                                 [f"店铺: {store_id}", "结果: 重授权出现滑块验证码，需人工滑一次",
                                  "人工在浏览器完成滑块后重跑本任务即可（红线：程序绝不碰验证码）"])
-            raise SystemExit(2)
+            return 2
+        if rc == "fail":
+            # 自动重试一次（2026-10-14：OCR 偶发掉字断链，重跑成功率实测高；
+            # 第二次全新导航，页面状态常已不同）
+            log("→ 联动失败，自动重试一次")
+            rc, ln2 = link_agent_center(w)
+            linked_name = linked_name or ln2
+            if rc == "captcha":
+                report.write_report("store-switch", False,
+                                    [f"店铺: {store_id}", "结果: 重授权出现滑块验证码，需人工滑一次"])
+                return 2
         time.sleep(2)
         acc, (b1, b2), lines = check_target(w)
         if acc is None and linked_name:
             acc = linked_name  # 右上角小字漏读 → 用授权链路上读到的店名
     if expected is not None and not _name_eq(acc, expected):
-        on_auth_now = find(lines, ["中国地区"], xmin=400) is not None
         report.write_report("store-switch", False,
                             [f"店铺: {store_id}",
                              f"结果: seller 已登录但 Agent Center 仍为 {acc or '未知'}（预期 {expected}）",
                              "请看截图核对页面状态；重跑一次本任务通常可恢复"])
-        raise SystemExit(3)
+        return 3
 
     ok = bool(b1 and b2)
     if not ok:
         report.write_report("store-switch", False,
                             [f"店铺: {store_id}", "结果: 双按钮未出现（页面状态异常，见截图）"])
-        raise SystemExit(3)
+        return 3
     if expected is None and store_id not in ACCOUNT_NAME:
         _learn_name(store_id, acc or linked_name)  # 首登学习店名（下次严格校验）
     lines = [
@@ -572,7 +840,40 @@ def main():
     ]
     report.write_report("store-switch", ok, lines)
     log(f"== 完成 ok={ok} 账号={acc} 耗时 {time.time()-t0:.0f}s ==")
-    raise SystemExit(0 if ok else 3)
+    return 0 if ok else 3
+
+
+LOCK_FILE = os.path.join(BASE, ".switch-lock")
+
+
+def _acquire_lock():
+    """同一时刻只允许一个切店进程（2026-10-14 事故：工作台残留任务与新任务
+    并发抢浏览器窗口，互相把对方的页面导航走，全部失败）。锁 15 分钟自动过期。"""
+    import atexit
+    if os.path.exists(LOCK_FILE):
+        try:
+            age = time.time() - os.path.getmtime(LOCK_FILE)
+        except OSError:
+            age = 1e9
+        if age < 900:
+            raise SystemExit("⚠ 已有另一个切店进程在运行（工作台任务？），为避免抢浏览器窗口已退出。"
+                             "确认没有后在等 15 分钟，或删除 driver/.switch-lock")
+    with open(LOCK_FILE, "w") as f:
+        f.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(LOCK_FILE) and os.remove(LOCK_FILE))
+
+
+def main():
+    _acquire_lock()
+    if "--check" in sys.argv:
+        raise SystemExit(check_only())
+    if "--doctor" in sys.argv:
+        raise SystemExit(doctor())
+    if "--verify-all" in sys.argv:
+        raise SystemExit(verify_all())
+    if len(sys.argv) < 2:
+        raise SystemExit(__doc__)
+    raise SystemExit(run_store(sys.argv[1]))
 
 
 if __name__ == "__main__":

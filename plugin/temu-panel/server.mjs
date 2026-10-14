@@ -16,6 +16,8 @@ const portArg = process.argv.indexOf("--port");
 const STANDALONE_PORT = portArg > -1 ? Number(process.argv[portArg + 1]) : null;
 
 // 店铺定义（账号切换式多店铺，详见 discoveries/store-switch.md）
+// 店铺列表从 local.config.json accounts 动态生成：加新店只需在配置里加一项，
+// 工作台自动出现对应任务卡（免改代码）。
 function loadPhonePrefixes() {
   try {
     const accs = JSON.parse(fs.readFileSync(path.join(TEMU_DIR, "local.config.json"), "utf-8")).accounts || {};
@@ -25,11 +27,12 @@ function loadPhonePrefixes() {
   } catch { return {}; }
 }
 const PHONE3 = loadPhonePrefixes();
-const STORES = [
-  { id: "main", label: `主店铺${PHONE3.main ? " " + PHONE3.main : ""}` },
-  { id: "store-b", label: `店铺B${PHONE3["store-b"] ? " " + PHONE3["store-b"] : ""}` },
-  { id: "store-c", label: `店铺C${PHONE3["store-c"] ? " " + PHONE3["store-c"] : ""}` },
-];
+const STORE_LABELS = { main: "主店铺", "store-b": "店铺B", "store-c": "店铺C" };
+function storeLabel(id) {
+  const base = STORE_LABELS[id] || ("店铺" + id.replace(/^store-?/i, "").toUpperCase());
+  return base + (PHONE3[id] ? " " + PHONE3[id] : "");
+}
+const STORES = Object.keys(PHONE3).map((id) => ({ id, label: storeLabel(id) }));
 
 function storeTaskPrompt(storeId, label) {
   return `先运行确定性切店脚本：python D:\\temu-agent\\driver\\switch_store.py ${storeId}（等待其完成，查看输出与退出码）。` +
@@ -40,13 +43,16 @@ function storeTaskPrompt(storeId, label) {
 
 const TASKS = {
   "sync-check": {
-    label: `体检 · ${STORES[0].label}`,
+    label: `体检 · ${STORES[0]?.label || "主店铺"}`,
     prompt: "按照 .claude/skills/temu-sync-check/SKILL.md 定义的流程执行每日同步体检任务（只读，不点任何同步按钮），完成后简短汇报结论。",
   },
-  "check:store-b": { label: `切到${STORES[1].label} + 体检`, prompt: storeTaskPrompt("store-b", STORES[1].label) },
-  "check:store-c": { label: `切到${STORES[2].label} + 体检`, prompt: storeTaskPrompt("store-c", STORES[2].label) },
-  "check:main": { label: `切回${STORES[0].label} + 体检`, prompt: storeTaskPrompt("main", STORES[0].label) },
 };
+for (const s of STORES) {
+  TASKS[`check:${s.id}`] = {
+    label: `${s.id === "main" ? "切回" : "切到"}${s.label} + 体检`,
+    prompt: storeTaskPrompt(s.id, s.label),
+  };
+}
 
 const state = {
   running: false,

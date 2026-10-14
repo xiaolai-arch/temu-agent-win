@@ -24,6 +24,20 @@ def tabs(win) -> list:
     return [t.window_text() for t in win.descendants(control_type="TabItem")]
 
 
+def tab_items(win) -> list:
+    """TabItem 元素列表（UIA 顺序 = 标签条顺序，可按索引 select）。"""
+    return win.descendants(control_type="TabItem")
+
+
+def switch_tab_index(win, idx: int) -> str:
+    """按索引切标签（-1 = 最右/最新）。"""
+    items = win.descendants(control_type="TabItem")
+    t = items[idx]
+    t.select()
+    time.sleep(1.2)
+    return t.window_text()
+
+
 def switch_tab(win, title_contains: str) -> str:
     for t in win.descendants(control_type="TabItem"):
         if title_contains in (t.window_text() or ""):
