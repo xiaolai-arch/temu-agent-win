@@ -46,6 +46,8 @@ TEMU 卖家自动化，**操控用户日常真实 Edge**（零自动化参数、
 ## 任务（skills）
 
 - `temu-sync-check`：每日同步体检（只读）——首个任务
+- `temu-store-switch`：切店（跑 driver/switch_store.py，agent 解读结果）
+- `temu-expect-region`：期望到货区域批量设为义乌（改数据；工作台卡片点击=授权，分批提交+筛选验证收尾）
 - 待发现：make-links（插件做链接）/ compliance（合规填写）/ collect-links（采集）/ price-review（价格）/ new-listing（上新）
 - 新流程方法论：交互发现（截图+OCR 笔记 discoveries/）→ dry-run ×3 → 用户确认 1 次真变更 → 固化 skill
 

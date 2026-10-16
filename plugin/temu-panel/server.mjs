@@ -36,7 +36,7 @@ const STORES = Object.keys(PHONE3).map((id) => ({ id, label: storeLabel(id) }));
 
 function storeTaskPrompt(storeId, label) {
   return `先运行确定性切店脚本：python D:\\temu-agent\\driver\\switch_store.py ${storeId}（等待其完成，查看输出与退出码）。` +
-    `若退出码 3（卡 Agent Center 授权页，该页对自动操作免疫）：明确提示用户"浏览器当前页面用鼠标点一下「商家中心」卡片"，等用户完成后重跑脚本验证。` +
+    `若退出码 3（验证失败：店名或双按钮没验上，切换链路本身已全自动）：先看截图（screenshots/sw-target*.png）核对页面状态并**重跑一次**，通常恢复；连续 2 次失败停手报告用户。` +
     `若退出码 2（验证码/密码问题）：如实报告，绝不代输验证码。` +
     `切店成功后按 .claude/skills/temu-sync-check/SKILL.md 流程做只读体检（登录态+双按钮+截图+报告）。全程不点任何同步按钮。`;
 }
@@ -44,12 +44,22 @@ function storeTaskPrompt(storeId, label) {
 const TASKS = {
   "sync-check": {
     label: `体检 · ${STORES[0]?.label || "主店铺"}`,
+    desc: "只读体检 · 不点同步按钮",
+    warn: "只读体检任务：验证登录态与双同步按钮，截图取证并生成中文报告。不会点击任何同步按钮。",
     prompt: "按照 .claude/skills/temu-sync-check/SKILL.md 定义的流程执行每日同步体检任务（只读，不点任何同步按钮），完成后简短汇报结论。",
+  },
+  "expect-region": {
+    label: "期望到货区域→义乌",
+    desc: "改数据 · 分批提交 · 幂等收敛",
+    warn: "改数据任务：把当前店铺全部 JIT/定制品的期望到货区域设为义乌（已是义乌的重复设置无副作用）。分批(每页500)提交，全程留截图与报告；遇验证码立即停手。",
+    prompt: "按照 .claude/skills/temu-expect-region/SKILL.md 定义的流程，把当前登录店铺的全部 JIT/定制品期望到货区域设为义乌（点击工作台卡片即视为执行授权）。先截图确认账号名写进报告，再分批全选→义乌→确认，最后按 skill 第5步三个筛选验证收尾并写报告。",
   },
 };
 for (const s of STORES) {
   TASKS[`check:${s.id}`] = {
     label: `${s.id === "main" ? "切回" : "切到"}${s.label} + 体检`,
+    desc: "切店（确定性脚本）+ 只读体检 · 不点同步按钮",
+    warn: "切店用确定性脚本（约2分钟）；体检只读不点同步按钮；遇验证码/授权卡会暂停等你。",
     prompt: storeTaskPrompt(s.id, s.label),
   };
 }
@@ -284,7 +294,7 @@ const STANDALONE_HTML = `<!doctype html>
   <div class="summary">
     <div class="chip" id="last"></div>
     <div class="chip" id="runtime"></div>
-    <div class="chip">改数据操作 <b>不进面板</b>（走对话确认）</div>
+    <div class="chip">改数据任务 <b>卡片点击即授权</b>（分批提交+报告留痕）</div>
   </div>
 
   <h2 class="sec">店铺任务</h2>
@@ -382,12 +392,11 @@ async function refresh() {
   }
 }
 
-function askRun(task, label) {
+function askRun(task, label, desc, warn) {
   pendingTask = task;
   document.getElementById("mTitle").textContent = "运行「" + label + "」";
-  document.getElementById("mDesc").innerHTML =
-    "只读体检任务：验证登录态与双同步按钮，截图取证并生成中文报告。<br>" +
-    "<b style='color:var(--warn)'>不会点击任何同步按钮</b>；切店任务遇到验证码会暂停等你。";
+  document.getElementById("mDesc").innerHTML = esc(desc || "") + "<br>" +
+    "<b style='color:var(--warn)'>" + esc(warn || "只读体检任务：不会点击任何同步按钮；切店任务遇到验证码会暂停等你。") + "</b>";
   document.getElementById("mask").classList.add("show");
 }
 function closeModal() { document.getElementById("mask").classList.remove("show"); pendingTask = null; }
@@ -415,7 +424,7 @@ async function loadReport() {
   });
 }
 
-function card(task, label, desc, enabled, avClass, ghost) {
+function card(task, label, desc, enabled, avClass, ghost, warn) {
   var c = document.createElement("div");
   c.className = "card" + (enabled ? "" : " disabled");
   if (task) c.setAttribute("data-task", task);
@@ -424,7 +433,7 @@ function card(task, label, desc, enabled, avClass, ghost) {
     '<div><h4>' + esc(name) + " " + (phone ? '<span class="phone">' + esc(phone) + "</span>" : "") + "</h4>" +
     "<p>" + esc(desc) + "</p></div>" +
     (ghost ? '<span class="tag">待发现</span>' : "");
-  if (enabled && task) c.onclick = function () { askRun(task, label); };
+  if (enabled && task) c.onclick = function () { askRun(task, label, desc, warn); };
   return c;
 }
 
@@ -435,7 +444,7 @@ var AVA = ["a1", "a2", "a3"];
     var st = await (await fetch("/status")).json();
     (st.tasks || []).forEach(function (t, i) {
       taskMap[t.id] = t.label;
-      grid.insertBefore(card(t.id, t.label, "只读体检 · 不点同步按钮", true, AVA[i % 3]), grid.firstChild);
+      grid.insertBefore(card(t.id, t.label, t.desc || "只读体检 · 不点同步按钮", true, AVA[i % 3], false, t.warn), grid.firstChild);
     });
   } catch (e) {}
   PLACEHOLDERS.forEach(function (p) { grid.appendChild(card(null, p[1], "流程待发现会话", false, "", true)); });
@@ -466,7 +475,7 @@ const server = http.createServer((req, res) => {
       finishedAt: state.finishedAt,
       exitCode: state.exitCode,
       lines: state.lines.length,
-      tasks: Object.entries(TASKS).map(([id, t]) => ({ id, label: t.label })),
+      tasks: Object.entries(TASKS).map(([id, t]) => ({ id, label: t.label, desc: t.desc, warn: t.warn })),
       lastStatus: readJson(STATUS_FILE),
     });
   }

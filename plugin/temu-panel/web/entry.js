@@ -80,7 +80,8 @@ export function mount(container, hostApi) {
     c.appendChild(el("h4", null, label));
     c.appendChild(el("p", null, desc));
     if (enabled) c.onclick = async () => {
-      if (!confirm(`运行「${label}」？（只读任务，不点任何同步按钮；切店任务遇验证码会暂停等你）`)) return;
+      const msg = `运行「${label}」？\n\n${desc}\n\n只读任务不点同步按钮；改数据任务分批提交并留报告；遇验证码一律停手。`;
+      if (!confirm(msg)) return;
       lineCount = 0; root.querySelector("#tp-log").textContent = "";
       await api.rpc("POST", "/run", { task: id });
       refresh(root);
@@ -90,7 +91,7 @@ export function mount(container, hostApi) {
   // 任务按钮从 /status 动态渲染（含各店切店+体检）
   api.rpc("GET", "/status").then((st) => {
     for (const t of [...(st.tasks || [])].reverse())
-      grid.insertBefore(card({ id: t.id, label: t.label, desc: "只读体检 · 不点同步按钮", enabled: true }), grid.firstChild);
+      grid.insertBefore(card({ id: t.id, label: t.label, desc: t.desc || "只读体检 · 不点同步按钮", enabled: true }), grid.firstChild);
   }).catch(() => {});
   for (const t of PLACEHOLDER_TASKS) grid.appendChild(card({ ...t, enabled: false }));
 
