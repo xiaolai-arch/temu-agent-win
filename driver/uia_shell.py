@@ -5,6 +5,16 @@ import winutil
 from input import human_click, type_keys
 
 
+def _lit(s: str) -> str:
+    """pywinauto send_keys 字面量转义：%^+~() 在其键盘语法里是特殊键
+    （% 是 ALT 修饰符！2026-10-16 实测 percent 编码 URL 打字后变成垃圾：
+    https%3A%2F%2Fagentseller… → httpsAFFagentseller…，下游 redirectUrl
+    全坏、授权弹窗白屏）。花括号留给真按键使用。"""
+    for ch in "^+%~()":
+        s = s.replace(ch, "{" + ch + "}")
+    return s
+
+
 def navigate(win, url: str):
     """Ctrl+L → 输入 URL → 回车（UIA 定位地址栏获得焦点，输入走真实键盘）。"""
     edits = [e for e in win.descendants(control_type="Edit")
@@ -15,7 +25,7 @@ def navigate(win, url: str):
     time.sleep(0.3)
     type_keys("^l^a")
     time.sleep(0.1)
-    type_keys(url, pause=0.01)
+    type_keys(_lit(url), pause=0.01)
     time.sleep(0.2)
     type_keys("{ENTER}")
 
