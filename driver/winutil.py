@@ -66,3 +66,46 @@ def window_summary(w) -> dict:
         "h": r.bottom - r.top,
         "minimized": w.is_minimized(),
     }
+
+
+# ---------- Chrome 支持（2026-10-17 加：插件安装 + 采集实验用） ----------
+
+def _proc_name(pid: int) -> str:
+    out = subprocess.run(
+        ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+        capture_output=True, text=True,
+    ).stdout.strip()
+    return out.split(",")[0].strip('"').lower() if out else ""
+
+
+def is_chrome(pid: int) -> bool:
+    return _proc_name(pid).startswith("chrome.exe")
+
+
+def chrome_windows() -> list:
+    result = []
+    for w in Desktop(backend="uia").windows(class_name=EDGE_CLASS):
+        try:
+            if w.is_visible() and is_chrome(w.process_id()):
+                result.append(w)
+        except Exception:
+            continue
+    return result
+
+
+def chrome_window():
+    wins = chrome_windows()
+    return wins[0] if wins else None
+
+
+def launch_chrome(url: str, timeout: float = 40) -> object:
+    """普通用户级启动（绝不带调试/注入参数）。"""
+    subprocess.run(f'start chrome "{url}"', shell=True)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(2)
+        wins = chrome_windows()
+        if wins:
+            time.sleep(3)
+            return wins[0]
+    raise RuntimeError("等待 Chrome 窗口超时")

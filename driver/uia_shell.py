@@ -30,6 +30,19 @@ def navigate(win, url: str):
     type_keys("{ENTER}")
 
 
+def current_url(win) -> str:
+    """读当前标签地址栏 URL（Chrome 地址栏 = name 含「地址」的 Edit）。"""
+    for e in win.descendants(control_type="Edit"):
+        if "地址" in (e.element_info.name or ""):
+            try:
+                v = e.get_value()
+            except Exception:
+                v = e.element_info.name
+            if v:
+                return v
+    return ""
+
+
 def tabs(win) -> list:
     return [t.window_text() for t in win.descendants(control_type="TabItem")]
 
