@@ -120,6 +120,18 @@ iface_toggle）→ 只用像素定位（同意行左侧 10-26px 空心灰方块�
 等 8s 且侧边栏最多点 3 次（`side_clicks`）防打断导航；URL 真值校验用剪贴板
 （`^l^c` + Get-Clipboard），UIA CurrentValue 与 OCR 都可能骗人。
 
+## 2026-10-19 事故：双按钮全消失（四个独立根因 + 修复）
+
+| 症状 | 根因 | 修复 |
+|---|---|---|
+| Edge 冷启动挂死在原生「无法加载该扩展」弹窗（#32770），脚本 `wait_window` 超时 exit 1 | **已归档项目 D:\temu-auto** 的 `ensure_edge.ps1` 还在 `--load-extension` 指 10-17 已改名的 `miaoshou-erp-plugin-v3`（死路径） | 该清单删死行——第三个插件已换成**同 ID 商店安装件**「跨境ERP助手」5.0.9（`ecofkipcicjifkppbgnkaghcfofmpkia`，解压副本 kuajing-erp-plugin-v3-5x 推导 ID 完全一致）；遇到该弹窗 UIA 点「确定」即放出主窗 |
+| 扩展页三件套全灰「请打开开发人员模式」→ 按钮不注入 | **开发人员模式被关**（扩展 `disable_reasons=[16777216]`；与 10-14 事故同族） | 扩展页 UIA Invoke 开发人员模式开关——**截图坐标会点偏**（按截图缩放算出的 (325,1133) 落空，UIA 真实矩形 (382,1424,437,1454) 才命中） |
+| `--doctor` 报「三个插件在位 ✅」但按钮全无（**假绿**） | 关键字 `miaoshou` 命中的是域名权限 `91miaoshou.com`，插件本体早已不在 | doctor 改解析 Secure Preferences JSON：注册 path/扩展 ID + `disable_reasons` 启用态 + `developer_mode` 明文 |
+| `check_target` 在正确的页面仍判 ❌（exit 3 误判） | 扩展刚启用时 service worker 休眠，F5 后按钮 **~12s** 才注入，固定 `sleep(6)` 不够 | `check_target` 改轮询（6 × shot+OCR、间隔 4s，最多再等 24s，双按钮齐即 break）；实测 4s❌ / 8s❌ / 12s✅✅ |
+
+另：`restore_extensions.py` EXTS 删掉死目录，跨境ERP助手改按商店 ID 检测（丢失才回退
+加载同 ID 解压副本）。doctor 建议文案同步覆盖「开发人员模式被关」场景。
+
 ## 新店接入 SOP（加第 4+ 家店铺，免改任何代码）
 
 1. `local.config.json` 的 `accounts` 里加一项：`"store-d": {"phone": "15x…", "password": "…"}`

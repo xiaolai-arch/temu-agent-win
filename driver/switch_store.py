@@ -678,13 +678,19 @@ def check_target(w, navigate=True):
         from input import type_keys as _tk
         w.set_focus()
         _tk("{F5}")
-        time.sleep(6)
+        time.sleep(4)
     except RuntimeError:
         if navigate:
             _navigate(w, TARGET_URL)
-            time.sleep(6)
-    path = shot(w, "target")
-    lines = ocr_lines(path)
+            time.sleep(4)
+    # 插件按钮注入非同步：扩展刚启用/SW 休眠时 F5 后 ~12s 才出现（2026-10-19 实测），
+    # 固定 sleep 6s 会把成功误判成 exit 3 → 轮询等注入，最多再等 24s
+    for _ in range(6):
+        path = shot(w, "target")
+        lines = ocr_lines(path)
+        if all(sync_buttons(lines)):
+            break
+        time.sleep(4)
     _dismiss_save_pwd(w, lines)  # 气泡可能盖住按钮/账号区
     acc = agent_account(lines)
     if acc is None and (sync_buttons(lines)[0] or sync_buttons(lines)[1]):
@@ -1241,24 +1247,56 @@ def doctor():
     except Exception as e:
         problems += 1
         print(f"local.config.json: ❌ {type(e).__name__}: {e}")
-    # 4) 同步插件在位（2026-10-14 事故：Edge 大版本更新把解压插件整批卸了，
-    #    双按钮全消失 → 所有店验证必失败）。恢复：python driver/restore_extensions.py
+    # 4) 同步插件在位（2026-10-14 事故：Edge 更新整批卸载解压插件；2026-10-19 事故：
+    #    开发人员模式被关 → 三插件全灰禁用，而关键字「miaoshou」误匹配域名权限
+    #    91miaoshou.com 让 doctor 假绿）。改按 Secure Preferences JSON 真实判定
+    #    （注册 + disable_reasons 启用态）。恢复：python driver/restore_extensions.py
     try:
         pref_dir = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data\Default")
-        blob = ""
-        for fn in ("Preferences", "Secure Preferences"):
+
+        def _jread(fn):
             try:
-                blob += open(os.path.join(pref_dir, fn), encoding="utf-8").read()
+                s = open(os.path.join(pref_dir, fn), encoding="utf-8").read()
             except OSError:
-                pass
-        need = [("佳同TEMU助手", "jiatong-temu"), ("忆托工具箱", "yishu-plugin"), ("妙手ERP", "miaoshou")]
-        have = [label for label, key in need if key in blob]
-        missing = [label for label, key in need if key not in blob]
-        if not missing:
-            print("同步插件: ✅ 佳同/忆托/妙手 全部在位")
-        else:
+                return None
+            nul = s.find("\0")
+            if nul > 0:
+                s = s[:nul]
+            try:
+                return json.loads(s)
+            except ValueError:
+                return None
+
+        settings = (_jread("Secure Preferences") or {}).get("extensions", {}).get("settings", {})
+        dev = (_jread("Preferences") or {}).get("extensions", {}).get("developer_mode")
+
+        def entry(sub):
+            for s in settings.values():
+                if sub in str(s.get("path") or "").lower():
+                    return s
+            return None
+
+        checks = [
+            ("佳同TEMU助手", entry("jiatong-temu")),
+            ("忆托工具箱", entry("yishu-plugin")),
+            # 跨境ERP助手（原妙手，10-17 换装为同 ID 商店安装件，无 path → 按扩展 ID 认）
+            ("跨境ERP助手", settings.get("ecofkipcicjifkppbgnkaghcfofmpkia")),
+        ]
+        missing = [lb for lb, e in checks if e is None]
+        disabled = [lb for lb, e in checks if e is not None and e.get("disable_reasons")]
+        if missing or disabled or dev is False:
             problems += 1
-            print(f"同步插件: ❌ 缺 {'/'.join(missing)} → 跑 python driver/restore_extensions.py 恢复")
+            detail = []
+            if missing:
+                detail.append(f"缺 {'/'.join(missing)}")
+            if disabled:
+                detail.append(f"已禁用 {'/'.join(disabled)}（多为开发人员模式被关）")
+            if dev is False:
+                detail.append("开发人员模式=关")
+            print(f"同步插件: ❌ {'；'.join(detail)} → 跑 python driver/restore_extensions.py"
+                  f"（或 edge://extensions 手动开开发人员模式）")
+        else:
+            print("同步插件: ✅ 佳同/跨境ERP/忆托 已注册且启用")
     except Exception as e:
         print(f"同步插件: ⚠ 检查失败 {type(e).__name__}")
     print(f"== 自检结束：{'✅ 全部通过' if problems == 0 else f'❌ {problems} 项异常'} ==")

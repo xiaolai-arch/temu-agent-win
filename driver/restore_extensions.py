@@ -22,7 +22,12 @@ from shot import screenshot, ocr
 from switch_store import log, find_line
 
 CROSS = r"C:\Users\34191\Desktop\cross"
-EXTS = ["jiatong-temu-387", "yishu-plugin", "miaoshou-erp-plugin-v3"]  # 旧 profile 同款三件套
+# 2026-10-19：miaoshou-erp-plugin-v3 目录已不存在（10-17 用户换装为同 ID 的
+# 商店安装件「跨境ERP助手」5.0.9，路径 kuajing-erp-plugin-v3-5x 仅作解压兜底）——
+# 旧 EXTS 含死路径会导致每次 restore 都去加载不存在的目录。
+EXTS = ["jiatong-temu-387", "yishu-plugin"]
+KUAJING_ID = "ecofkipcicjifkppbgnkaghcfofmpkia"  # 跨境ERP助手（商店件按 ID 认，无 path）
+KUAJING_DIR = "kuajing-erp-plugin-v3-5x"          # 同 ID 解压副本，商店件丢失时兜底
 DLG_EDIT, DLG_BTN = (600, 710), (1031, 755)  # 「选择要加载的扩展目录」对话框实测坐标
 
 
@@ -95,6 +100,8 @@ def _load_unpacked(w, folder: str):
 def main():
     blob = _prefs_blob()
     missing = [e for e in EXTS if e not in blob]
+    if KUAJING_ID not in blob:
+        missing.append(KUAJING_DIR)  # 跨境ERP助手（商店件）丢了 → 加载同 ID 解压副本
     if not missing:
         log("三个插件都在位，无需恢复 ✅")
         return 0
@@ -115,6 +122,8 @@ def main():
         time.sleep(2)
     blob = _prefs_blob()
     still = [e for e in EXTS if e not in blob]
+    if KUAJING_ID not in blob:
+        still.append(KUAJING_DIR)
     log("恢复完成：" + ("全部在位 ✅" if not still else f"仍缺 {still}，请人工核对 edge://extensions"))
     return 0 if not still else 1
 

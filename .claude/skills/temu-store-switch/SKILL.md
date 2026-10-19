@@ -26,8 +26,10 @@ python D:\temu-agent\driver\switch_store.py --verify-all  # 全店轮回实测�
 
 ## 环境出问题时（双按钮全消失 / 全部 failpage）
 
-先 `--doctor`：OCR 管线、各店凭据、**同步插件在位**（Edge 大版本更新会把解压插件
-整批卸掉——2026-10-14 事故）都查。缺插件跑 `python driver/restore_extensions.py` 恢复。
+先 `--doctor`：OCR 管线、各店凭据、**同步插件注册且启用（含开发人员模式开关）**（Edge
+大版本更新会把解压插件整批卸掉——2026-10-14 事故；开发人员模式被关——2026-10-19 事故，
+doctor 按 Secure Preferences 真实判定不再假绿）都查。缺插件/开关关着跑
+`python driver/restore_extensions.py` 一键恢复（会自动开开发人员模式）。
 
 ## 加新店铺（免改代码）
 
