@@ -618,15 +618,28 @@ def do_login(w, phone, password):
     # 1) 模式
     if not ensure_phone_pwd_mode(w):
         return "failpage"
-    # 2) 手机号
-    lines = ocr_lines(shot(w, "form"))
-    box = find(lines, "+86") or find(lines, ["手机号登录", "手机号登"], exact=True) or (1877, 631)
-    click(w, (box[0] + (135 if find(lines, "+86") else 0), box[1]))
-    time.sleep(0.3)
-    type_keys("^a")
-    type_keys(phone, pause=0.03)
-    time.sleep(0.3)
-    # 3) 密码（Tab 法：点手机号框→Tab 焦点进密码框）
+    # 2) 手机号（2026-10-19 实测：输入框可能预填「86」且点击后整段丢键 → 输完
+    #    回读 OCR 数字位数，不符就重点重输，避免带坏号提交报「手机号码格式不对」）
+    phone_ok = False
+    for att in range(3):
+        lines = ocr_lines(shot(w, "form"))
+        box = find(lines, "+86") or find(lines, ["手机号登录", "手机号登"], exact=True) or (1877, 631)
+        click(w, (box[0] + (135 if find(lines, "+86") else 0), box[1]))
+        time.sleep(0.4)
+        type_keys("^a")
+        type_keys(phone, pause=0.04)
+        time.sleep(0.5)
+        rl = ocr_lines(shot(w, f"phv{att}"))
+        val = "".join(l["text"].replace(" ", "") for l in rl
+                      if l["x"] > 1780 and 610 < l["y"] < 670)
+        nd = sum(c.isdigit() for c in val)
+        if nd >= 9:  # 完整号 11 位；容忍 2 位 OCR 误读（预填「86」只有 2 位）
+            phone_ok = True
+            break
+        log(f"→ 手机号输入未生效（回读 {nd} 位），重点重输 {att + 1}/3")
+    if not phone_ok:
+        return "failpage"
+    # 3) 密码（Tab 法：上面验证通过时焦点必在手机号框 → Tab 必进密码框）
     type_keys("{TAB}")
     time.sleep(0.2)
     type_keys("^a")
@@ -853,10 +866,12 @@ def _store_name_from(lines):
 
 
 def _find_checkbox(w, policy_line):
-    """授权卡协议勾选框像素定位：政策行上方的浅灰描边空心方框（10-26px 宽，
-    上下边沿成对）。2026-10-14 教训：框相对文字行首的偏移会漂（-28px 经验值在
-    store-b 卡上点在框外 19px，勾选失败 → 按钮点了没反应）。找不到返回 None
-    （调用方回退 -28px 老经验值——10-13 与 07:21 两张卡实测该值有效）。"""
+    """授权卡协议勾选框像素定位：政策行附近的浅灰描边空心方框（10-26px 宽，
+    上下边沿成对 + 内芯浅色）。2026-10-14 教训：框相对文字行首的偏移会漂
+    （-28px 经验值点框外 → 勾选失败按钮没反应）。2026-10-19 教训：扩展挂件
+    「弹框已恢复」会把授权行 OCR 拆成两段，含关键词的右段距框可达 220px →
+    扫描窗左界从 tx-110 扩到 tx-400；文字抗锯齿/红点挂件会假匹配灰边 →
+    加内芯浅色校验。找不到返回 None（调用方回退 -28px 老经验值）。"""
     from PIL import Image
     path = shot(w, "cbx")
     img = Image.open(path).convert("RGB")
@@ -869,7 +884,7 @@ def _find_checkbox(w, policy_line):
         return 195 < v < 247  # 浅灰描边（219-233 实测）；白底 251+，正文/遮罩更深
 
     runs = []
-    x = max(760, tx - 110)
+    x = max(760, tx - 400)
     while x < tx + 30:
         if edge(x, ty - 11):
             xa = x
@@ -878,14 +893,28 @@ def _find_checkbox(w, policy_line):
             runs.append((xa, x - 1))
         else:
             x += 1
+    found = None
     for xa, xb in runs:
         width = xb - xa + 1
         if not (10 <= width <= 26):
             continue
         bot = sum(1 for xx in range(xa, xb + 1) if edge(xx, ty + 6))
-        if bot >= max(5, width - 4):
-            return ((xa + xb) // 2, ty - 2)
-    return None
+        if bot < max(5, width - 4):
+            continue
+        # 内芯浅色校验：空心框内是白底；文字抗锯齿/挂件内芯含深像素
+        cols = range(xa + 3, xb - 2)
+        rows = range(ty - 7, ty + 3)
+        if cols and rows:
+            tot = light = 0
+            for xx in cols:
+                for yy in rows:
+                    tot += 1
+                    if sum(px[xx, yy]) // 3 > 245:
+                        light += 1
+            if tot and light / tot < 0.7:
+                continue
+        found = ((xa + xb) // 2, ty - 2)  # 多候选时取最靠右（最贴近文字起点）
+    return found
 
 
 def _uia_click(el):
@@ -940,7 +969,11 @@ def link_agent_center_ui(w):
                 store_name = nm
                 log(f"→ 卡片读到目标店名: {store_name}")
         # ① 内嵌授权卡：勾协议 → 确认授权并前往
-        cb = find_line(lines, ["已阅读并同意", "板块共享", "即将前往"])
+        # 关键词两段查：授权行优先（2026-10-19 教训：弹窗卡标题也含「即将前往」
+        # 且 OCR 排在授权行前 → 抢锚，回退公式把点击算到标题上，连点 10 轮空转；
+        # 授权行又被挂件拆成两段 → 「您授权」段必须在关键词里）；标题只作兜底
+        cb = (find_line(lines, ["已阅读并同意", "板块共享", "您授权"])
+              or find_line(lines, "即将前往"))
         btnp = find(lines, "确认授权并前往", xmin=0)
         if cb and btnp:
             pos = _find_checkbox(w, cb) or (cb["x"] - 28, cb["y"] + cb["h"] // 2)
@@ -948,6 +981,13 @@ def link_agent_center_ui(w):
             click(w, pos)
             acted = True
             time.sleep(1.2)
+            # 勾选验证：复扫空心框。仍扫到 = 没勾上（点歪/被挂件吞），用复扫框位重点一次
+            re = _find_checkbox(w, cb)
+            if re is not None:
+                p2 = re
+                log(f"→ 勾选未生效，复扫框位重点 {p2}")
+                click(w, p2)
+                time.sleep(1.2)
             okbtn = False
             for att in range(3):
                 for el in _ui_doc(w):
