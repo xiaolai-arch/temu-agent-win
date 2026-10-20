@@ -120,10 +120,17 @@ def main():
         _load_unpacked(w, CROSS + "\\" + name)
         uia_shell.navigate(w, "edge://extensions")
         time.sleep(2)
-    blob = _prefs_blob()
-    still = [e for e in EXTS if e not in blob]
-    if KUAJING_ID not in blob:
-        still.append(KUAJING_DIR)
+    # Edge 异步落盘 prefs（debounce 数秒）→ 加载完立刻查会读到旧值误报「仍缺」
+    # （2026-10-21 实测：kuajing 明明已注册启用却报缺）。轮询到全部在位或超时。
+    still = [KUAJING_DIR]
+    for i in range(6):
+        blob = _prefs_blob()
+        still = [e for e in EXTS if e not in blob]
+        if KUAJING_ID not in blob:
+            still.append(KUAJING_DIR)
+        if not still:
+            break
+        time.sleep(3)
     log("恢复完成：" + ("全部在位 ✅" if not still else f"仍缺 {still}，请人工核对 edge://extensions"))
     return 0 if not still else 1
 
