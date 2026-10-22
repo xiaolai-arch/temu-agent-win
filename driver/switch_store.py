@@ -401,10 +401,84 @@ def _ui_authorize_card(pw, quick=False):
         time.sleep(2)
 
 
+def _set_clipboard(text: str):
+    """写剪贴板。只用于手机号这类非敏感文本——密码绝不走剪贴板/日志。"""
+    import subprocess
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command", f"Set-Clipboard -Value '{text}'"],
+        capture_output=True, timeout=15)
+
+
+def _row_digits(rl, anchor_kw="+86"):
+    """读 anchor 关键词所在行 + 同 y 带右侧 OCR 行的数字位数（扣掉 anchor 自带的 86）。
+    输入框与 +86 常被 OCR 合成一行或拆两行，两种都覆盖。"""
+    ln = next((l for l in rl if anchor_kw in l["text"].replace(" ", "")), None)
+    if ln is None:
+        return 0
+    nd = 0
+    for l in rl:
+        if abs(l["y"] - ln["y"]) <= 25 and l["x"] >= ln["x"]:
+            nd += sum(c.isdigit() for c in l["text"])
+    return max(0, nd - 2)  # 扣掉 +86 自带的两位
+
+
+def _clear_input(w, tag=None):
+    """清空输入框。2026-10-22 实测根因：该类输入框 ^a 全选无效 → 手机号被追加到
+    预填「86」后成 12 位 → 报「手机号码格式不对」（不是丢键！）。改 END + 连续
+    退格清空，实测有效（清空后 OCR 读到占位符「请输入手机号」）。"""
+    type_keys("{END}")
+    time.sleep(0.15)
+    for _ in range(24):
+        type_keys("{BACKSPACE}")
+    time.sleep(0.5)
+
+
+def _phone_click_pos(w, tag):
+    """定位手机号输入框（不是 +86 国家码下拉）。
+    2026-10-22 实测根因：UIA 里名字以「+86」开头的 Edit 是**国家码选择器**，
+    点它中心会弹出地区下拉（中国大陆/中国香港），手机号根本没被输入。
+    正确锚点：OCR「+86」文本中心 + 130~135px（历史上验证可用的公式）。"""
+    rl = ocr_lines(shot(w, f"{tag}loc"))
+    ln = next((l for l in rl if "+86" in l["text"].replace(" ", "")), None)
+    if ln is None:
+        return None
+    return (ln["x"] + ln["w"] // 2 + 132, ln["y"] + ln["h"] // 2)
+
+
+def _enter_phone(w, phone, tag, uia_pos=None, rounds=3):
+    """手机号输入 + OCR 回读校验（主登录页 / settle 弹窗共用思路）。
+    2026-10-22 两个根因：① 点击落在 +86 国家码下拉上（弹地区选择器），
+    手机号没进框；② ^a 全选无效 → 即便点对，号码也会被追加到预填「86」后。
+    修：OCR「+86 中心+132px」定位真实输入框 + END+退格清空 + 回读位数校验。
+    UIA 不暴露 Value pattern，只能 OCR 回读。"""
+    for att in range(rounds):
+        pos = _phone_click_pos(w, f"{tag}{att}")
+        if pos is None:
+            log("→ 未找到 +86 锚点，跳过本轮")
+            continue
+        click(w, pos)
+        time.sleep(0.5)
+        _clear_input(w)
+        if att < 2:
+            type_keys(phone, pause=0.05)
+        else:
+            _set_clipboard(phone)
+            type_keys("^v")
+        time.sleep(0.8)
+        nd = _row_digits(ocr_lines(shot(w, f"{tag}v{att}")))
+        if 9 <= nd <= 13:
+            if att:
+                log(f"→ 手机号输入成功（第 {att + 1} 次，{'粘贴' if att >= 2 else '逐键'}法）")
+            return True
+        log(f"→ 手机号回读异常（{nd} 位），换法重输 {att + 1}/{rounds}")
+    return False
+
+
 def _complete_settle_form(pw, phone, password):
     """settle/seller-login 表单（OCR 常漏密码行、按钮叫「授权登录」）：
-    点手机号框 ^a 重打 → Tab 进密码框输密（键盘落点随焦点，不猜坐标）
-    → UIA Toggle 协议 → Invoke「授权登录」。密码绝不打印。"""
+    手机号用 _enter_phone（回读校验 + 策略升级，防预填「86」丢键）→ Tab 进密码框
+    输密（键盘落点随焦点，不猜坐标）→ UIA Toggle 协议 → Invoke「授权登录」。
+    密码绝不打印。"""
     try:
         cb = btn = phone_edit = None
         for el in _ui_doc(pw, safe_click=True):
@@ -419,15 +493,14 @@ def _complete_settle_form(pw, phone, password):
                 cb = el
             elif ct == "Button" and "授权登录" in nm.replace(" ", "") and btn is None:
                 btn = el
-        if phone_edit is not None:
-            r = phone_edit.rectangle()
-            human_click((r.left + r.right) // 2, (r.top + r.bottom) // 2)
-            time.sleep(0.4)
-        type_keys("^a")
-        type_keys(phone, pause=0.04)
+        # 手机号定位不再用 UIA：名字以「+86」开头的 Edit 是国家码下拉（点它开地区
+        # 选择器），_enter_phone 改用 OCR「+86 中心+132px」自己定位真实输入框
+        if not _enter_phone(pw, phone, "settle"):
+            log("→ settle 手机号三次输入均未生效，放弃本轮")
+            return False
         type_keys("{TAB}")
         time.sleep(0.3)
-        type_keys("^a")
+        _clear_input(w)
         type_keys(password, pause=0.05)
         time.sleep(0.4)
         if cb is not None:
@@ -618,31 +691,13 @@ def do_login(w, phone, password):
     # 1) 模式
     if not ensure_phone_pwd_mode(w):
         return "failpage"
-    # 2) 手机号（2026-10-19 实测：输入框可能预填「86」且点击后整段丢键 → 输完
-    #    回读 OCR 数字位数，不符就重点重输，避免带坏号提交报「手机号码格式不对」）
-    phone_ok = False
-    for att in range(3):
-        lines = ocr_lines(shot(w, "form"))
-        box = find(lines, "+86") or find(lines, ["手机号登录", "手机号登"], exact=True) or (1877, 631)
-        click(w, (box[0] + (135 if find(lines, "+86") else 0), box[1]))
-        time.sleep(0.4)
-        type_keys("^a")
-        type_keys(phone, pause=0.04)
-        time.sleep(0.5)
-        rl = ocr_lines(shot(w, f"phv{att}"))
-        val = "".join(l["text"].replace(" ", "") for l in rl
-                      if l["x"] > 1780 and 610 < l["y"] < 670)
-        nd = sum(c.isdigit() for c in val)
-        if nd >= 9:  # 完整号 11 位；容忍 2 位 OCR 误读（预填「86」只有 2 位）
-            phone_ok = True
-            break
-        log(f"→ 手机号输入未生效（回读 {nd} 位），重点重输 {att + 1}/3")
-    if not phone_ok:
+    # 2) 手机号（_enter_phone 内置 OCR 回读 + 策略升级，防预填「86」丢键）
+    if not _enter_phone(w, phone, "login", rounds=3):
         return "failpage"
     # 3) 密码（Tab 法：上面验证通过时焦点必在手机号框 → Tab 必进密码框）
     type_keys("{TAB}")
     time.sleep(0.2)
-    type_keys("^a")
+    _clear_input(w)
     type_keys(password, pause=0.05)
     time.sleep(0.4)
     # 4) 登录按钮：UIA Invoke 优先（白字按钮 OCR 常漏读 → 坐标兜底点空 → 假成功）
