@@ -31,9 +31,24 @@ ERP_URL = "https://erp.91miaoshou.com/pddkj/collect_box/items"
 LOGGED_MARKS = ("未发布", "采集箱", "待办事项", "常用功能")
 LOGIN_MARKS = ("立即登录", "忘记密码", "请输入验证码")
 KEYWORDS = [
-    "custom napkins", "personalized napkins", "custom paper napkins",
-    "custom logo napkins", "custom cocktail napkins", "custom wedding napkins",
-]   # 2026-10-18 用户指令：只采定制餐巾（靠翻页深度找新货，插件去重兜底）
+    # 2026-10-22 选品调研换池（数据/依据：research/reports/2026-10-22-选品报告.md，26词实测销量）
+    # 季节窗口优先（感恩节 11/26、圣诞采购季 10-12 月，错过等一年）
+    "custom thanksgiving napkins", "custom christmas napkins",
+    "personalized christmas napkins", "personalized holiday napkins",
+    "custom new years eve napkins",
+    # 常青主力：首页 TOP5 销量 1412-2150，超过旧池王牌 custom wedding napkins(1923)
+    "custom bachelorette party napkins", "custom disco napkins",
+    "custom cowgirl napkins", "custom anniversary napkins",
+    "custom baby shower napkins", "custom birthday napkins",
+    "custom bridal shower napkins", "quinceanera napkins personalized",
+    "rustic wedding napkins personalized",
+    # 补充位：B2B / 低竞争小众
+    "custom napkins bulk", "monogram napkins", "personalized baptism napkins",
+    "custom graduation napkins",
+]
+# 12月上架位：custom valentines day napkins（TOP5=1629，情人节 2/14，12月再入池）
+# 已排除：retirement(需求≈0)/engagement(375)/boho+sage green(成品印花为主，定制标0-1)
+# 旧池(2026-10-18，已饱和)：custom/personalized/paper/logo/cocktail/wedding napkins
 CELL_DX, CELL_DY = 146, -250   # 价格文本 → 卡片图片中心
 NAPKIN_KW = ("napkin", "serviette", "餐巾", "纸巾")   # 详情页标题白名单（2026-10-18：混入泡泡机后加）
 

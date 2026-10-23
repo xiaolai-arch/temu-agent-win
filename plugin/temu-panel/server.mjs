@@ -1,6 +1,7 @@
-// temu-panel 后端：任务按钮 → spawn Claude Code CLI（headless，cwd=D:\temu-agent）→ 实时日志行。
+// temu-panel 后端：任务按钮 → spawn Claude Code CLI（headless，cwd=temu-agent 项目目录）→ 实时日志行。
 // 双模式：被 CloudCLI 宿主 spawn（随机端口 + stdout ready 协议）；
 //         独立运行 `node server.mjs --port 3790` → 浏览器打开 http://127.0.0.1:3790 即独立工作台。
+// 项目目录默认 D:\temu-agent，可用环境变量 TEMU_DIR 覆盖（跨机器迁移只改环境变量）。
 import http from "node:http";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -8,7 +9,7 @@ import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
 
-const TEMU_DIR = "D:\\temu-agent";
+const TEMU_DIR = process.env.TEMU_DIR || "D:\\temu-agent";
 const STATUS_FILE = path.join(TEMU_DIR, "logs", "last-status.json");
 const REPORT_FILE = path.join(TEMU_DIR, "logs", "report-latest.md");
 
@@ -35,7 +36,8 @@ function storeLabel(id) {
 const STORES = Object.keys(PHONE3).map((id) => ({ id, label: storeLabel(id) }));
 
 function storeTaskPrompt(storeId, label) {
-  return `先运行确定性切店脚本：python D:\\temu-agent\\driver\\switch_store.py ${storeId}（等待其完成，查看输出与退出码）。` +
+  const sep = process.platform === "win32" ? "\\" : "/";
+  return `先运行确定性切店脚本：python ${TEMU_DIR}${sep}driver${sep}switch_store.py ${storeId}（等待其完成，查看输出与退出码）。` +
     `若退出码 3（验证失败：店名或双按钮没验上，切换链路本身已全自动）：先看截图（screenshots/sw-target*.png）核对页面状态并**重跑一次**，通常恢复；连续 2 次失败停手报告用户。` +
     `若退出码 2（验证码/密码问题）：如实报告，绝不代输验证码。` +
     `切店成功后按 .claude/skills/temu-sync-check/SKILL.md 流程做只读体检（登录态+双按钮+截图+报告）。全程不点任何同步按钮。`;

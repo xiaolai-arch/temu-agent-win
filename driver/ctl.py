@@ -62,16 +62,18 @@ def main():
         import glob
         import json
         import os
+        SHOTS = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "screenshots"))
         if len(sys.argv) > 2:
-            cands = sorted(glob.glob(os.path.join(r"D:\temu-agent\screenshots", f"*-{sys.argv[2]}.png")))
+            cands = sorted(glob.glob(os.path.join(SHOTS, f"*-{sys.argv[2]}.png")))
         else:
-            cands = sorted(glob.glob(os.path.join(r"D:\temu-agent\screenshots", "*.png")))
+            cands = sorted(glob.glob(os.path.join(SHOTS, "*.png")))
         from shot import ocr
         result = ocr(cands[-1])
         for l in result["lines"]:
             print(f"({l['x']},{l['y']},{l['w']}x{l['h']}) {l['text']}")
     elif cmd == "dialog":
-        ps = r"D:\temu-agent\scripts\pick_folder4.ps1"
+        import os
+        ps = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts", "pick_folder4.ps1"))
         import subprocess as sp
         p = sp.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                       "-File", ps, "-TargetPath", sys.argv[2]],

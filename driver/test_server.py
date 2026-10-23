@@ -1,5 +1,6 @@
 """端到端自测：以 MCP 客户端方式起 server 子进程，调核心工具链。"""
 import asyncio
+import os
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -10,7 +11,7 @@ from mcp.client.stdio import stdio_client
 
 async def main():
     params = StdioServerParameters(command=sys.executable, args=["server.py"],
-                                   cwd=r"D:\temu-agent\driver")
+                                   cwd=os.path.dirname(os.path.abspath(__file__)))
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()

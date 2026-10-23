@@ -8,10 +8,10 @@ description: TEMU 店铺切换（账号切换式多店铺）。核心是运行�
 ## 首选：直接跑脚本（快而稳，~150-190 秒/店，含登录）
 
 ```
-python D:\temu-agent\driver\switch_store.py <store-id>    # main / store-b / store-c / …（配置里的都行）
-python D:\temu-agent\driver\switch_store.py --check       # 只看当前在哪店
-python D:\temu-agent\driver\switch_store.py --doctor      # 环境自检（OCR/窗口/凭据/同步插件，不登录）
-python D:\temu-agent\driver\switch_store.py --verify-all  # 全店轮回实测（加新店后必跑）
+python driver/switch_store.py <store-id>    # main / store-b / store-c / …（配置里的都行）
+python driver/switch_store.py --check       # 只看当前在哪店
+python driver/switch_store.py --doctor      # 环境自检（OCR/窗口/凭据/同步插件，不登录）
+python driver/switch_store.py --verify-all  # 全店轮回实测（加新店后必跑）
 ```
 
 脚本内含完整流程（详见 discoveries/store-switch.md）：

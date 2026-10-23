@@ -4,7 +4,7 @@
       python miaoshou_login.py --check    # 只检测登录态，不做任何输入
       python miaoshou_login.py --captcha 3210   # OCR 认不出时，人工看 ms-captcha.png 后直填重跑
 
-凭据：D:\\temu-agent\\local.config.json 的 miaoshou.phone/password（绝不打印）。
+凭据：项目根 local.config.json 的 miaoshou.phone/password（绝不打印）。
 退出码：0=已登录/登录成功  1=环境/页面异常  2=需要人工（密码错等）  3=验证码多次失败
 
 流程（每步 OCR 实时定位）：

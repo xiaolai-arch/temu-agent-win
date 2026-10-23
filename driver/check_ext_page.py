@@ -8,7 +8,8 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8")
 from shot import ocr
 
-cands = sorted(glob.glob(os.path.join(r"D:\temu-agent\screenshots", "*.png")), key=os.path.getmtime)
+SHOTS = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "screenshots"))
+cands = sorted(glob.glob(os.path.join(SHOTS, "*.png")), key=os.path.getmtime)
 path = cands[-1]
 print("file:", os.path.basename(path))
 keys = sys.argv[1:] or ["扩展", "同步", "忆托", "yishu"]

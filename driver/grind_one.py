@@ -5,12 +5,13 @@
 只读除提交调价外的一切操作。结果写入 stdout。
 """
 import math
+import os
 import re
 import sys
 import time
 
 sys.stdout.reconfigure(encoding="utf-8")
-sys.path.insert(0, r"D:\temu-agent\driver")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import winutil
 import uia_shell
@@ -87,6 +88,16 @@ def main():
         if xx:
             click(w, xx, 1.5)
             break
+
+    # 0.5) 活动邀请弹窗（黑五等）拦截：点「暂不调整」关闭，绝不点确认
+    for _ in range(2):
+        lines = ocr_lines(w, "promo")
+        zbtz = next(((l["x"]+l["w"]//2, l["y"]+l["h"]//2) for l in lines
+                     if "暂不调整" in l["text"].replace(" ", "")), None)
+        if not zbtz:
+            break
+        click(w, zbtz, 1.5)
+        log("→ 关闭活动邀请弹窗（暂不调整）")
 
     # 1) 查询 SKC（label 锚点 + 固定坐标兜底；轮询等页面渲染）
     inp = q = None
@@ -173,6 +184,15 @@ def main():
             type_keys("{ESC}")
             time.sleep(1.5)
             continue
+        # 弹窗内「我知道了」提示浮层：点掉再匹配
+        for _ in range(2):
+            flines = ocr_lines(w, "iknow")
+            ik = next(((l["x"]+l["w"]//2, l["y"]+l["h"]//2) for l in flines
+                       if l["text"].replace(" ", "") in ("我知道了", "知道了")), None)
+            if not ik:
+                break
+            click(w, ik, 1.5)
+            log("→ 关闭「我知道了」浮层")
         p = screenshot(w, "hdr")
         img = Image.open(p)
         crop = img.crop((780, 240, 2400, 480))
@@ -180,8 +200,10 @@ def main():
         zp = p.replace(".png", "-h.png")
         crop.save(zp)
         title = "".join(l["text"].replace(" ", "") for l in ocr(zp)["lines"])
-        # 主判据：弹窗头部「SKC ID：数字」；标题关键词兜底
-        if re.search(r"SKC.{0,3}" + skc, title) or (kw and kw in title):
+        # 主判据：弹窗内任意位置的「SKC…ID数字」（长标题会把 SKC ID 行挤出
+        # 固定裁剪区，整窗 OCR 才稳）；标题关键词兜底
+        whole = "".join(l["text"].replace(" ", "") for l in ocr_lines(w, "whole"))
+        if re.search(r"SKC.{0,4}" + skc, whole) or (kw and kw in title):
             matched = True
             log(f"✓ 匹配目标：{title[:36]}")
             break
@@ -241,7 +263,7 @@ def main():
                 if abs(l2["y"] - (py - 15)) <= 45 and l2["x"] < 1300
                 and len(l2["text"].replace(" ", "")) > 1]
         for l2 in zone:
-            m2 = re.search(r"(\d+)\s*(?:pcs|件|张)", l2["text"])
+            m2 = re.search(r"(\d+)\s*(?:pcs|件|张|片)", l2["text"])
             if m2 and int(m2.group(1)) <= 999:
                 return int(m2.group(1))
         for l2 in zone:

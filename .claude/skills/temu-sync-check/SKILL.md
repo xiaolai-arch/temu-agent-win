@@ -22,7 +22,7 @@ description: TEMU 每日同步体检（只读）：导航到定制商品页，�
    - 行2：插件按钮（两个按钮+坐标 / 缺失）
    - 行3：**"未执行任何同步点击"**（只读任务，必须如实）
    - 未登录时加指引：直接跑切店脚本恢复（见下「未登录/别店处理」），勿手动走授权流程
-8. **未登录 / 停在别店**：`python D:\temu-agent\driver\switch_store.py <store-id>`（全程
+8. **未登录 / 停在别店**：`python driver/switch_store.py <store-id>`（全程
    自动到同步页，含登录与身份切换；切回当前在用店 = `main`）。**不要**手动点授权卡、
    也不要直航 `auth/authentication?redirectUrl=...`——那只刷新授权不切身份（2026-10-16 实测）。
    切店后回到步骤 1 重跑体检。

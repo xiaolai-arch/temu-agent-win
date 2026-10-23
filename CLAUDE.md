@@ -3,6 +3,15 @@
 TEMU 卖家自动化，**操控用户日常真实 Edge**（零自动化参数、零调试端口、不重启浏览器），
 根治旧 CDP 方案"程序一跑就触发风控重新验证"的问题。取代 D:\temu-auto。
 
+## 目录结构（2026-10-24 模块化整理）
+
+- `driver/`：Windows 浏览器自动化层——分层与每个脚本职责见 **driver/README.md**（核心层 / 店铺任务 / 采集 / 验证码 / 自检）
+- `research/`：调研与运营数据——**research/README.md**；进行中任务交接在 `research/reports/HANDOFF-*.md`，运营数据在 `research/store-data/`
+- `plugin/temu-panel/`：工作台面板（Node，项目目录可用环境变量 TEMU_DIR 覆盖）
+- `.claude/skills/`：temu-sync-check / temu-store-switch / temu-expect-region
+- `discoveries/`：交互发现笔记；`docs/`：地基验证 + **Mac 迁移指南（docs/MIGRATION-MAC.md）**
+- `local.config.json`：凭据（gitignored）
+
 ## 工作方式
 
 你是 computer-use 操作员：通过 `temu-driver` MCP 工具"看屏幕（screenshot/ocr_last）→ 思考 → 动作（click_point/type_text/press_keys）"。
@@ -61,3 +70,17 @@ TEMU 卖家自动化，**操控用户日常真实 Edge**（零自动化参数、
 | 截图坐标点了没反应 | 确认最近一次 screenshot 与当前页面一致（坐标系失效则重截） |
 | 登录态过期 | 如实报告 + 截图，指引人工登录；不自动打开登录页 |
 | Edge 后台无窗口但有进程 | 正常（启动加速），edge_navigate 拉起即可 |
+
+## LinkFox API 技能（2026-10-22 新增，Temu 写操作优先走 API）
+
+已装 26 技能 + 路由到 `C:\Users\34191\.zcode\skills\linkfox-*`，完整方案见
+`research/reports/2026-10-22-店群AI接管工作流设计.md`。要点：
+
+- **写操作（发品/改价/库存/订单/发货）优先用 Temu 官方 API 技能**（`linkfox-temu-*`），
+  浏览器点击（temu-driver）只作 API 失败的兜底和采集用。速卖通采集链路不变。
+- 认证两样：环境变量 `LINKFOXAGENT_API_KEY` + Temu access_token（每店铺一个，
+  `linkfox-temu-add-product-us/scripts/temu_token_guide.py` 引导；授权应用名须为「酷鸟卖家助手」）。
+- **算力计费**：数据/合规技能（geekbi/ruiguan/1688）按调用扣费——失败或空结果禁止自动换词重试；
+  批量前先小样试。脚本默认把响应落盘 `linkfox/<日期>/<session>/`，读摘要优先，别整份进上下文。
+- API 写操作（发品/改价/上下架）仍守红线 1：需用户在对话中明确确认；查询类可直接跑。
+- 找更多技能：`linkfoxskill search <词>`（市场共 295 个，速卖通无专属技能）。

@@ -1,4 +1,9 @@
+# Windows 自动化层（driver/）
 mcp>=2
 comtypes
 pywinauto
 pillow
+
+# 调研分析（research/，跨平台）
+openpyxl
+requests

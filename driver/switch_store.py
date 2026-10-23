@@ -5,7 +5,7 @@
       python switch_store.py --doctor            # 环境自检（OCR/窗口/凭据，不登录）
       python switch_store.py --verify-all        # 所有配置店铺轮回切换实测（加新店后跑这个）
 
-凭据：D:\\temu-agent\\local.config.json 的 accounts.<id>（手机号+密码，绝不打印）。
+凭据：项目根 local.config.json 的 accounts.<id>（手机号+密码，绝不打印）。
 
 流程（每步 OCR 实时定位，坐标漂移免疫）：
   1. 确保窗口（无则普通参数拉起）→ 导航干净 /login（已登录也直接出登录页）
