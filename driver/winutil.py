@@ -1,5 +1,12 @@
-"""Win32 公共层：DPI 感知、Edge 窗口枚举（UIA 壳层，只读）。"""
+"""Win32 公共层：DPI 感知、浏览器窗口枚举（UIA 壳层，只读）。
+
+2026-10-26 起同步流程的目标浏览器改为 ego 浏览器（Chromium 内核 fork）。
+窗口类名与 Edge 同为 Chrome_WidgetWin_1，故 OCR/像素/UIA 引擎可原样复用；
+差异仅在进程名（ego.exe vs msedge.exe）、启动命令、profile 路径三处。
+BROWSER 环境变量可切回 Edge：TEMU_BROWSER=edge
+"""
 import ctypes
+import os
 import subprocess
 import time
 
@@ -9,21 +16,43 @@ from pywinauto import Desktop  # noqa: E402
 
 EDGE_CLASS = "Chrome_WidgetWin_1"
 
+# 目标浏览器：ego（默认）或 edge。决定进程名过滤、启动命令、插件检查路径。
+BROWSER = os.environ.get("TEMU_BROWSER", "ego").strip().lower()
+if BROWSER not in ("ego", "edge"):
+    BROWSER = "ego"
 
-def is_msedge(pid: int) -> bool:
+# ego 的 profile 目录（活动 profile = Profile 1，有 TEMU 登录态与解压插件）
+EGO_PROFILE_DIR = os.path.expandvars(
+    r"%LOCALAPPDATA%\Citro Labs\ego lite\User Data\Profile 1")
+EDGE_PROFILE_DIR = os.path.expandvars(
+    r"%LOCALAPPDATA%\Microsoft\Edge\User Data\Default")
+
+
+def profile_dir() -> str:
+    """当前目标浏览器的 profile 目录（doctor / restore 读插件注册用）。"""
+    return EGO_PROFILE_DIR if BROWSER == "ego" else EDGE_PROFILE_DIR
+
+
+def is_browser(pid: int) -> bool:
+    """pid 是否属于当前目标浏览器进程（ego.exe / msedge.exe）。
+    保留旧名 is_msedge 作为别名，避免旧调用点失效。"""
+    want = "ego.exe" if BROWSER == "ego" else "msedge.exe"
     out = subprocess.run(
         ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
         capture_output=True, text=True,
     ).stdout.strip()
-    return out.lower().startswith('"msedge.exe"')
+    return out.lower().startswith(f'"{want}"')
+
+
+is_msedge = is_browser  # 向后兼容别名
 
 
 def edge_windows() -> list:
-    """桌面顶层、可见、属于 msedge.exe 的窗口（UIA 元素）。"""
+    """桌面顶层、可见、属于当前目标浏览器（ego.exe/msedge.exe）的窗口（UIA 元素）。"""
     result = []
     for w in Desktop(backend="uia").windows(class_name=EDGE_CLASS):
         try:
-            if w.is_visible() and is_msedge(w.process_id()):
+            if w.is_visible() and is_browser(w.process_id()):
                 result.append(w)
         except Exception:
             continue
@@ -44,8 +73,15 @@ def default_window():
 
 
 def launch_edge(url: str, timeout: float = 40) -> object:
-    """普通用户级启动（绝不带调试/注入参数）。复用现有实例开窗口。"""
-    subprocess.run(f'start msedge "{url}"', shell=True)
+    """普通用户级启动（绝不带调试/注入参数）。复用现有实例开窗口。
+    2026-10-26：ego 改用 ego-browser.exe（带 URL 参数直接开窗并导航，
+    实测可用）；Edge 保持 start msedge。"""
+    if BROWSER == "ego":
+        exe = (r"C:\Users\34191\.local\share\ego\active_version_dir"
+               r"\ego-browser.exe")
+        subprocess.Popen([exe, url])
+    else:
+        subprocess.run(f'start msedge "{url}"', shell=True)
     deadline = time.time() + timeout
     while time.time() < deadline:
         time.sleep(2)

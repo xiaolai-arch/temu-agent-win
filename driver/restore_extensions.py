@@ -31,9 +31,16 @@ KUAJING_DIR = "kuajing-erp-plugin-v3-5x"          # 同 ID 解压副本，商店
 DLG_EDIT, DLG_BTN = (600, 710), (1031, 755)  # 「选择要加载的扩展目录」对话框实测坐标
 
 
+def _ext_url() -> str:
+    """扩展管理页 URL：ego 用 chrome://extensions（实测），Edge 用 edge://extensions。"""
+    import winutil
+    return ("chrome://extensions" if winutil.BROWSER == "ego"
+            else "edge://extensions")
+
+
 def _prefs_blob() -> str:
-    import os
-    pref_dir = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data\Default")
+    import winutil
+    pref_dir = winutil.profile_dir()  # ego/Edge 由 BROWSER 决定（2026-10-26）
     blob = ""
     for fn in ("Preferences", "Secure Preferences"):
         try:
@@ -70,7 +77,7 @@ def _open_dev_mode(w):
         if _dev_mode_on(w):
             log(f"→ 开发人员模式已打开（点击 {cx},{cy}）")
             return
-    raise SystemExit("❌ 没能打开开发人员模式，请人工在 edge://extensions 打开后重跑")
+    raise SystemExit(f"❌ 没能打开开发人员模式，请人工在 {_ext_url()} 打开后重跑")
 
 
 def _load_unpacked(w, folder: str):
@@ -109,7 +116,7 @@ def main():
     if not w:
         raise SystemExit("无 Edge 窗口")
     w.set_focus()
-    uia_shell.navigate(w, "edge://extensions")
+    uia_shell.navigate(w, _ext_url())
     time.sleep(2.5)
     if not _dev_mode_on(w):
         log("→ 开发人员模式关闭，尝试打开…")
@@ -118,7 +125,7 @@ def main():
     for name in missing:
         log(f"→ 加载插件 {name}")
         _load_unpacked(w, CROSS + "\\" + name)
-        uia_shell.navigate(w, "edge://extensions")
+        uia_shell.navigate(w, _ext_url())
         time.sleep(2)
     # Edge 异步落盘 prefs（debounce 数秒）→ 加载完立刻查会读到旧值误报「仍缺」
     # （2026-10-21 实测：kuajing 明明已注册启用却报缺）。轮询到全部在位或超时。
@@ -131,7 +138,7 @@ def main():
         if not still:
             break
         time.sleep(3)
-    log("恢复完成：" + ("全部在位 ✅" if not still else f"仍缺 {still}，请人工核对 edge://extensions"))
+    log("恢复完成：" + ("全部在位 ✅" if not still else f"仍缺 {still}，请人工核对 {_ext_url()}"))
     return 0 if not still else 1
 
 

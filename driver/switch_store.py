@@ -193,6 +193,26 @@ def _ui_text_action(w, text):
     return False
 
 
+def _url_has_domain(u: str, key: str) -> bool:
+    """URL 是否含目标域名（容错 OCR 混淆字符）。
+    2026-10-26 实测：OCR 把 agentseller 的小写 l 读成大写 I（agentseIIer），
+    直接 `key in u` 判失败 → 导航明明成功却重试 3 轮，白费 ~24s/次。
+    把 i/l/1、0/o 等易混字符归一后做正则匹配。"""
+    if not key:
+        return True
+    import re as _re
+    # 把 key 里每个易混字符扩成字符类，容忍 OCR 读错其中任一形态
+    pat = ""
+    for ch in key.lower():
+        if ch in "il1|":
+            pat += "[il1|]"
+        elif ch in "0o":
+            pat += "[0o]"
+        else:
+            pat += _re.escape(ch)
+    return _re.search(pat, u.lower()) is not None
+
+
 def _navigate(w, url, tries=3):
     """导航 + 验证重试。navigate 键盘输入在焦点被抢时会静默落空
     （2026-10-16 10:01 实测：URL 没变、后续步骤全错位）。"""
@@ -203,7 +223,7 @@ def _navigate(w, url, tries=3):
         time.sleep(4)
         lines = ocr_lines(shot(w, f"navv{i}"))
         u = next((l["text"].replace(" ", "") for l in lines if "http" in l["text"].lower()), "")
-        if not key or key in u:
+        if _url_has_domain(u, key):
             return True
         log(f"→ 导航未生效（当前 {u[:60]}），重试")
         w.set_focus()
@@ -235,14 +255,22 @@ def ensure_phone_pwd_mode(w):
 
 
 def detect_block(lines):
-    """验证码 / 账密错误检测（红线：验证码绝不自动碰）。"""
+    """验证码 / 账密错误检测（红线：验证码绝不自动碰）。
+    2026-10-26 修误判：登录页底部**永远**有「无法收到验证码」链接，旧逻辑用它排除
+    会把「账号安全验证」短信弹窗整个排除掉 → 误判 failpage（EXIT 1）→ 脚本去重试
+    登录而非停手交人，违反红线。改为强信号优先：滑块类无条件判 captcha；
+    安全验证弹窗的独有特征（账号安全验证 / 6位验证码）也无条件判 captcha。"""
     text = " ".join(l["text"].replace(" ", "") for l in lines)
+    # ① 滑块类（无歧义，页面固有链接不可能含这些词）
+    for k in ["滑块", "拖动", "拼图"]:
+        if k in text:
+            return "captcha"
+    # ② 短信/安全验证弹窗（「无法收到验证码」是登录页固有链接，不能用来排除）
+    if "账号安全验证" in text or "6位验证码" in text or "请输入验证码" in text:
+        return "captcha"
+    # ③ 其余验证码特征（保留旧排除逻辑兜底）
     if any(k in text for k in CAPTCHA_WORDS) and "无法收到验证码" not in text:
-        # 「无法收到验证码」是登录页固有链接，排除；真验证码会有其它特征词
-        for k in ["滑块", "拖动", "拼图"]:
-            if k in text:
-                return "captcha"
-        if "请输入验证码" in text or "发送验证码" in text:
+        if "发送验证码" in text or "获取验证码" in text:
             return "captcha"
     if any(k in text for k in AUTHFAIL_WORDS):
         return "authfail"
@@ -308,9 +336,19 @@ def _ui_doc(w, safe_click=False):
         else:
             type_keys("{TAB}")
         time.sleep(1.1)
-        doc = Desktop(backend="uia").window(handle=w.handle) \
-            .child_window(control_type="Document", found_index=0).wrapper_object()
-        return doc.descendants()
+        # 2026-10-26：ego 多标签时窗口下有多个 Document（含残留的空页/错误页），
+        # found_index=0 会拿到空 Document（子孙=6，页面内容读不到）——Edge 单页时
+        # index 0 恰好是当前页。改为取子孙最多的 Document（当前活跃页内容最全）。
+        docs = w.descendants(control_type="Document")
+        best, best_n = None, -1
+        for d in docs:
+            try:
+                n = len(d.descendants())
+            except Exception:
+                continue
+            if n > best_n:
+                best, best_n = d, n
+        return best.descendants() if best is not None else []
     except Exception:
         return []
 
@@ -478,9 +516,12 @@ def _complete_settle_form(pw, phone, password):
     """settle/seller-login 表单（OCR 常漏密码行、按钮叫「授权登录」）：
     手机号用 _enter_phone（回读校验 + 策略升级，防预填「86」丢键）→ Tab 进密码框
     输密（键盘落点随焦点，不猜坐标）→ UIA Toggle 协议 → Invoke「授权登录」。
-    密码绝不打印。"""
+    密码绝不打印。
+    2026-10-26 修两处：① 密码清空误用未定义的 w（NameError 被 except 吞掉 →
+    密码根本没输、勾选/提交被跳过），改用参数 pw；② cb/btn 在 _enter_phone（含
+    多轮截图+点击）前取的句柄到用时已失效 → 改为输完密码后重新取。"""
     try:
-        cb = btn = phone_edit = None
+        phone_edit = None
         for el in _ui_doc(pw, safe_click=True):
             try:
                 ct = el.element_info.control_type
@@ -489,10 +530,6 @@ def _complete_settle_form(pw, phone, password):
                 continue
             if ct == "Edit" and nm.startswith("+86") and phone_edit is None:
                 phone_edit = el
-            elif ct == "CheckBox" and cb is None:
-                cb = el
-            elif ct == "Button" and "授权登录" in nm.replace(" ", "") and btn is None:
-                btn = el
         # 手机号定位不再用 UIA：名字以「+86」开头的 Edit 是国家码下拉（点它开地区
         # 选择器），_enter_phone 改用 OCR「+86 中心+132px」自己定位真实输入框
         if not _enter_phone(pw, phone, "settle"):
@@ -500,18 +537,36 @@ def _complete_settle_form(pw, phone, password):
             return False
         type_keys("{TAB}")
         time.sleep(0.3)
-        _clear_input(w)
+        _clear_input(pw)
         type_keys(password, pause=0.05)
         time.sleep(0.4)
+        # 输完密码后重新取勾选框/按钮（此前的句柄已随页面重绘失效）
+        cb = btn = None
+        for el in _ui_doc(pw, safe_click=True):
+            try:
+                ct = el.element_info.control_type
+                nm = (el.window_text() or "").strip()
+            except Exception:
+                continue
+            if ct == "CheckBox" and cb is None:
+                cb = el
+            elif ct == "Button" and "授权登录" in nm.replace(" ", "") and btn is None:
+                btn = el
         if cb is not None:
-            cb.iface_toggle.Toggle()
+            try:
+                cb.iface_toggle.Toggle()
+            except Exception:
+                from input import human_click
+                r = cb.rectangle()
+                human_click((r.left + r.right) // 2, (r.top + r.bottom) // 2)
             time.sleep(0.6)
         if btn is not None:
             btn.iface_invoke.Invoke()
             log("→ settle 登录表单已提交（授权登录）")
             return True
+        log("→ settle 表单未找到「授权登录」按钮")
     except Exception as e:
-        log(f"⚠ settle 表单处理失败: {type(e).__name__}")
+        log(f"⚠ settle 表单处理失败: {type(e).__name__}: {e}")
     return False
 
 
@@ -1347,7 +1402,7 @@ def doctor():
     #    91miaoshou.com 让 doctor 假绿）。改按 Secure Preferences JSON 真实判定
     #    （注册 + disable_reasons 启用态）。恢复：python driver/restore_extensions.py
     try:
-        pref_dir = os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\User Data\Default")
+        pref_dir = winutil.profile_dir()  # ego/Edge 由 BROWSER 决定（2026-10-26）
 
         def _jread(fn):
             try:
