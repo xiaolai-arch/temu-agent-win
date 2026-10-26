@@ -1,3 +1,5 @@
+> 📌 2026-10-26 模块化重组：文中 driver/xxx.py 已迁至 core|store|collect|pricing|delist|export 对应模块，research/store-data 已按业务拆入各模块 data/，research/reports 的 HANDOFF 已移至 docs/。路径以根 README 模块地图为准。
+
 # store-switch（账号切换式多店铺）— 发现会话（2026-10-12/13 定稿，2026-10-16 UIA 链路修订）
 
 ## 模式定案

@@ -37,7 +37,7 @@ const STORES = Object.keys(PHONE3).map((id) => ({ id, label: storeLabel(id) }));
 
 function storeTaskPrompt(storeId, label) {
   const sep = process.platform === "win32" ? "\\" : "/";
-  return `先运行确定性切店脚本：python ${TEMU_DIR}${sep}driver${sep}switch_store.py ${storeId}（等待其完成，查看输出与退出码）。` +
+  return `先运行确定性切店脚本：python ${TEMU_DIR}${sep}store${sep}switch_store.py ${storeId}（等待其完成，查看输出与退出码）。` +
     `若退出码 3（验证失败：店名或双按钮没验上，切换链路本身已全自动）：先看截图（screenshots/sw-target*.png）核对页面状态并**重跑一次**，通常恢复；连续 2 次失败停手报告用户。` +
     `若退出码 2（验证码/密码问题）：如实报告，绝不代输验证码。` +
     `切店成功后按 .claude/skills/temu-sync-check/SKILL.md 流程做只读体检（登录态+双按钮+截图+报告）。全程不点任何同步按钮。`;

@@ -4,7 +4,6 @@ local.config.json
 # 运行产物
 logs/
 screenshots/
-reports/
 
 # Python
 __pycache__/
@@ -14,8 +13,8 @@ __pycache__/
 # Node / 插件构建
 node_modules/
 plugin/temu-panel/dist/
-driver/.last-shot.json
-driver/.switch-lock
+core/.last-shot.json
+store/.switch-lock
 
 # ZCode 会话产物
 .zcode/

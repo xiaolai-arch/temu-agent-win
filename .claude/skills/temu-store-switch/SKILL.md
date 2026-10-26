@@ -1,6 +1,6 @@
 ---
 name: temu-store-switch
-description: TEMU 店铺切换（账号切换式多店铺）。核心是运行确定性脚本 driver/switch_store.py，agent 负责解读结果与兜底。用户要求"切店/切到某店/去店铺B"或某店体检前使用。
+description: TEMU 店铺切换（账号切换式多店铺）。核心是运行确定性脚本 store/switch_store.py，agent 负责解读结果与兜底。用户要求"切店/切到某店/去店铺B"或某店体检前使用。
 ---
 
 # temu-store-switch — 店铺切换
@@ -8,10 +8,10 @@ description: TEMU 店铺切换（账号切换式多店铺）。核心是运行�
 ## 首选：直接跑脚本（快而稳，~150-190 秒/店，含登录）
 
 ```
-python driver/switch_store.py <store-id>    # main / store-b / store-c / …（配置里的都行）
-python driver/switch_store.py --check       # 只看当前在哪店
-python driver/switch_store.py --doctor      # 环境自检（OCR/窗口/凭据/同步插件，不登录）
-python driver/switch_store.py --verify-all  # 全店轮回实测（加新店后必跑）
+python store/switch_store.py <store-id>    # main / store-b / store-c / …（配置里的都行）
+python store/switch_store.py --check       # 只看当前在哪店
+python store/switch_store.py --doctor      # 环境自检（OCR/窗口/凭据/同步插件，不登录）
+python store/switch_store.py --verify-all  # 全店轮回实测（加新店后必跑）
 ```
 
 脚本内含完整流程（详见 discoveries/store-switch.md）：
@@ -20,7 +20,7 @@ python driver/switch_store.py --verify-all  # 全店轮回实测（加新店后�
    → 确认授权并前往 → 确认切换弹窗——蓝钮白字用像素定位；UIA 失败自动重试一次，
    再退像素链路；含后台新标签里的弹窗处理）
 → 店名 + 双按钮验证 → 中文报告。
-同一时刻只允许一个切店进程（文件锁 driver/.switch-lock，15 分钟过期）。
+同一时刻只允许一个切店进程（文件锁 store/.switch-lock，15 分钟过期）。
 
 退出码：0 成功 / 1 页面异常 / 2 验证码或账密错 / 3 验证失败（重跑一次通常恢复）。
 
@@ -29,7 +29,7 @@ python driver/switch_store.py --verify-all  # 全店轮回实测（加新店后�
 先 `--doctor`：OCR 管线、各店凭据、**同步插件注册且启用（含开发人员模式开关）**（Edge
 大版本更新会把解压插件整批卸掉——2026-10-14 事故；开发人员模式被关——2026-10-19 事故，
 doctor 按 Secure Preferences 真实判定不再假绿）都查。缺插件/开关关着跑
-`python driver/restore_extensions.py` 一键恢复（会自动开开发人员模式）。
+`python store/restore_extensions.py` 一键恢复（会自动开开发人员模式）。
 
 ## 加新店铺（免改代码）
 

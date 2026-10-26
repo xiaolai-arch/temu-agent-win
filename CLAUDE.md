@@ -3,14 +3,18 @@
 TEMU 卖家自动化，**操控用户日常真实 Edge**（零自动化参数、零调试端口、不重启浏览器），
 根治旧 CDP 方案"程序一跑就触发风控重新验证"的问题。取代 D:\temu-auto。
 
-## 目录结构（2026-10-24 模块化整理）
+## 目录结构（2026-10-26 按业务模块重组：代码+数据+文档随模块走）
 
-- `driver/`：Windows 浏览器自动化层——分层与每个脚本职责见 **driver/README.md**（核心层 / 店铺任务 / 采集 / 验证码 / 自检）
-- `research/`：调研与运营数据——**research/README.md**；进行中任务交接在 `research/reports/HANDOFF-*.md`，运营数据在 `research/store-data/`
+- `core/`：自动化基础设施（winutil/uia_shell/input/shot/ocr.ps1/report + MCP server + 验证码）——见 core/README.md
+- `store/`：切店·登录·同步验证(--check)·环境自检(--doctor)：switch_store / restore_extensions
+- `collect/`：采集（速卖通→妙手ERP）：collect_run / miaoshou_login
+- `select/`：选品扫描 + 选品报告；`pricing/`：调价（make_adjust_todo / grind_batch / grind_one / ego引擎 + data/工单）
+- `delist/`：下架（csx_delist + data/工单）；`export/`：商品导出·盘点（export_goods / analyze_stores + data/各店快照）
+- 各模块用法/数据状态见各自 README.md
+- `docs/`：架构方案 + **HANDOFF 任务交接** + 报告 + Mac 迁移指南（docs/MIGRATION-MAC.md）
 - `plugin/temu-panel/`：工作台面板（Node，项目目录可用环境变量 TEMU_DIR 覆盖）
 - `.claude/skills/`：temu-sync-check / temu-store-switch / temu-expect-region
-- `discoveries/`：交互发现笔记；`docs/`：地基验证 + **Mac 迁移指南（docs/MIGRATION-MAC.md）**
-- `local.config.json`：凭据（gitignored）
+- `discoveries/`：交互发现笔记；`local.config.json`：凭据（gitignored）
 
 ## 工作方式
 
@@ -26,7 +30,7 @@ TEMU 卖家自动化，**操控用户日常真实 Edge**（零自动化参数、
    拉起只用普通 `start msedge <url>`（edge_navigate 已内置）。
 3. **绝不关闭 Edge 的开发人员模式，绝不改动 `C:\Users\34191\Desktop\cross\` 插件目录**（路径决定插件 ID）。
 4. 凭据只存 `local.config.json`（gitignored）；日志/报告绝不打印密码/Token 值，只允许键名和长度。
-5. 操作节奏人类化（driver 已内置随机延迟）；自动化运行期间报告注明"占用浏览器窗口"。
+5. 操作节奏人类化（core 已内置随机延迟）；自动化运行期间报告注明"占用浏览器窗口"。
 
 ## 核心页面知识（从 temu-auto 迁移，已验证）
 
@@ -55,7 +59,7 @@ TEMU 卖家自动化，**操控用户日常真实 Edge**（零自动化参数、
 ## 任务（skills）
 
 - `temu-sync-check`：每日同步体检（只读）——首个任务
-- `temu-store-switch`：切店（跑 driver/switch_store.py，agent 解读结果）
+- `temu-store-switch`：切店（跑 store/switch_store.py，agent 解读结果）
 - `temu-expect-region`：期望到货区域批量设为义乌（改数据；工作台卡片点击=授权，分批提交+筛选验证收尾）
 - 待发现：make-links（插件做链接）/ compliance（合规填写）/ collect-links（采集）/ price-review（价格）/ new-listing（上新）
 - 新流程方法论：交互发现（截图+OCR 笔记 discoveries/）→ dry-run ×3 → 用户确认 1 次真变更 → 固化 skill
@@ -74,7 +78,7 @@ TEMU 卖家自动化，**操控用户日常真实 Edge**（零自动化参数、
 ## LinkFox API 技能（2026-10-22 新增，Temu 写操作优先走 API）
 
 已装 26 技能 + 路由到 `C:\Users\34191\.zcode\skills\linkfox-*`，完整方案见
-`research/reports/2026-10-22-店群AI接管工作流设计.md`。要点：
+`docs/2026-10-22-店群AI接管工作流设计.md`。要点：
 
 - **写操作（发品/改价/库存/订单/发货）优先用 Temu 官方 API 技能**（`linkfox-temu-*`），
   浏览器点击（temu-driver）只作 API 失败的兜底和采集用。速卖通采集链路不变。
